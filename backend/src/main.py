@@ -1,0 +1,354 @@
+"""FastAPI main application."""
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from typing import List, Optional, Dict
+import logging
+from pathlib import Path
+import shutil
+import uuid
+
+from src.config import settings
+from src.features.documents.domain.entities import Document, DocumentType, DocumentStatus
+from src.features.documents.infrastructure.pdf_processor import PDFProcessor
+from src.features.documents.infrastructure.word_processor import WordProcessor
+from src.features.documents.application.document_service import DocumentService
+from src.features.chat.application.chat_service import ChatService, ChatRequest, ChatResponse
+from src.features.rag.domain.chunking import ChunkingStrategy
+from src.features.rag.infrastructure.embedding_service import OpenAIEmbeddingService
+from src.features.rag.infrastructure.lancedb_store import LanceDBVectorStore
+from src.features.rag.infrastructure.openrouter_client import OpenRouterClient
+from src.features.rag.domain.interfaces import Message
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Create FastAPI app
+app = FastAPI(
+    title="RAG System API",
+    description="Retrieval-Augmented Generation chatbot with multi-model LLM support",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global services (singleton pattern)
+_document_service: Optional[DocumentService] = None
+_chat_service: Optional[ChatService] = None
+_vector_store: Optional[LanceDBVectorStore] = None
+_openrouter_client: Optional[OpenRouterClient] = None
+
+# In-memory document storage (Phase 1 - replace with DB in Phase 2)
+documents_db:  Dict[str, Document] = {}
+
+
+async def get_document_service() -> DocumentService:
+    """Get or create document service instance."""
+    global _document_service, _vector_store
+
+    if _document_service is None:
+        # Initialize vector store
+        _vector_store = LanceDBVectorStore(settings.VECTOR_DB_PATH)
+        await _vector_store.initialize()
+
+        # Initialize services
+        pdf_processor = PDFProcessor()
+        word_processor = WordProcessor()
+        chunking_strategy = ChunkingStrategy(
+            chunk_size=settings.CHUNK_SIZE,
+            overlap=settings.CHUNK_OVERLAP
+        )
+
+        # Use OpenRouter for embeddings (Single Provider)
+        embedding_service = OpenAIEmbeddingService(
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL,
+            model=settings.EMBEDDING_MODEL
+        )
+
+        _document_service = DocumentService(
+            pdf_processor=pdf_processor,
+            word_processor=word_processor,
+            chunking_strategy=chunking_strategy,
+            embedding_service=embedding_service,
+            vector_store=_vector_store,
+            storage_path=settings.DOCUMENT_STORAGE_PATH
+        )
+
+    return _document_service
+
+
+async def get_chat_service() -> ChatService:
+    """Get or create chat service instance."""
+    global _chat_service, _vector_store, _openrouter_client
+
+    if _chat_service is None:
+        # Initialize vector store if needed
+        if _vector_store is None:
+            _vector_store = LanceDBVectorStore(settings.VECTOR_DB_PATH)
+            await _vector_store.initialize()
+
+        # Initialize services
+        # Use OpenRouter for embeddings (Single Provider)
+        embedding_service = OpenAIEmbeddingService(
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL,
+            model=settings.EMBEDDING_MODEL
+        )
+
+        _openrouter_client = OpenRouterClient(
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL
+        )
+
+        _chat_service = ChatService(
+            embedding_service=embedding_service,
+            vector_store=_vector_store,
+            llm_client=_openrouter_client
+        )
+
+    return _chat_service
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    logger.info("Starting RAG System API...")
+    logger.info(f"Vector DB Path: {settings.VECTOR_DB_PATH}")
+    logger.info(f"Document Storage: {settings.DOCUMENT_STORAGE_PATH}")
+
+    # Pre-initialize services
+    await get_document_service()
+    await get_chat_service()
+
+    logger.info("✅ RAG System API ready!")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    global _openrouter_client
+
+    if _openrouter_client:
+        await _openrouter_client.close()
+
+    logger.info("RAG System API shutdown complete")
+
+
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "message": "RAG System API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "status": "operational"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "documents": len(documents_db)}
+
+
+# ==================== Document Endpoints ====================
+
+@app.post("/api/documents/upload", response_model=Dict)
+async def upload_document(
+    file: UploadFile = File(...),
+    doc_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Upload and process a document.
+
+    Supports PDF and DOCX files.
+    """
+    try:
+        # Validate file type
+        filename = file.filename
+        extension = Path(filename).suffix.lower()
+
+        if extension == ".pdf":
+            doc_type = DocumentType.PDF
+        elif extension in [".docx", ".doc"]:
+            doc_type = DocumentType.DOCX
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {extension}. Please upload PDF or DOCX files."
+            )
+
+        # Save file
+        file_id = str(uuid.uuid4())
+        file_path = Path(settings.DOCUMENT_STORAGE_PATH) / f"{file_id}{extension}"
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        logger.info(f"Saved file: {filename} -> {file_path}")
+
+        # Process document
+        document = await doc_service.process_document(
+            file_path=str(file_path),
+            document_type=doc_type,
+            original_filename=filename
+        )
+
+        # Store in memory
+        documents_db[document.id] = document
+
+        logger.info(f"✅ Document processed: {filename} ({document.chunk_count} chunks)")
+
+        return {
+            "id": document.id,
+            "filename": document.filename,
+            "status": document.status,
+            "chunk_count": document.chunk_count,
+            "size_bytes": document.size_bytes,
+            "document_type": document.document_type,
+            "uploaded_at": document.uploaded_at.isoformat(),
+            "metadata": document.metadata
+        }
+
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/documents", response_model=List[Dict])
+async def list_documents():
+    """List all uploaded documents."""
+    return [
+        {
+            "id": doc.id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "chunk_count": doc.chunk_count,
+            "size_bytes": doc.size_bytes,
+            "document_type": doc.document_type,
+            "uploaded_at": doc.uploaded_at.isoformat(),
+            "metadata": doc.metadata
+        }
+        for doc in documents_db.values()
+    ]
+
+
+@app.delete("/api/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    doc_service: DocumentService = Depends(get_document_service)
+):
+    """Delete a document and all its chunks."""
+    if document_id not in documents_db:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        # Delete from vector store
+        await doc_service.delete_document(document_id)
+
+        # Remove from memory
+        del documents_db[document_id]
+
+        logger.info(f"✅ Document deleted: {document_id}")
+
+        return {"message": "Document deleted successfully"}
+
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Chat Endpoints ====================
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Process a chat query using RAG.
+
+    Returns answer with sources and confidence score.
+    """
+    try:
+        logger.info(f"Chat request: {request.query[:50]}... (model: {request.model})")
+
+        response = await chat_service.chat(request)
+
+        logger.info(f"✅ Response generated: confidence={response.confidence:.2f}")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error processing chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models")
+async def list_models():
+    """Get list of available LLM models from OpenRouter."""
+    global _openrouter_client
+
+    if _openrouter_client is None:
+        _openrouter_client = OpenRouterClient(
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENROUTER_BASE_URL
+        )
+
+    try:
+        models = await _openrouter_client.get_available_models()
+
+        # Filter to show most relevant models
+        featured_models = [
+            m for m in models
+            if any(name in m.get("id", "").lower() for name in [
+                "llama", "gpt", "claude", "mistral", "gemini"
+            ])
+        ]
+
+        return {"models": featured_models[:20]}  # Limit to top 20
+
+    except Exception as e:
+        logger.error(f"Error fetching models: {e}")
+        # Return default models if API fails
+        return {
+            "models": [
+                {
+                    "id": "meta-llama/llama-3-70b-instruct",
+                    "name": "Llama 3 70B Instruct",
+                    "context_length": 8192,
+                    "pricing": {"prompt": "0", "completion": "0"}
+                },
+                {
+                    "id": "openai/gpt-4-turbo",
+                    "name": "GPT-4 Turbo",
+                    "context_length": 128000,
+                    "pricing": {"prompt": "0.01", "completion": "0.03"}
+                }
+            ]
+        }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "src.main:app",
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        reload=settings.API_RELOAD
+    )

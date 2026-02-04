@@ -1,0 +1,54 @@
+Project Requirement: AI-Powered Chatbot with RAG Pipeline
+1. Objective
+Develop an AI-driven chatbot application that:
+•	Uses Retrieval-Augmented Generation (RAG) for accurate, context-aware responses.
+•	Supports multi-modal input (text, documents, images, audio, video).
+•	Provides analytics, insights, and confidence scores.
+•	Implements enterprise-grade guardrails for security and compliance.
+•	Enables data connectivity to multiple sources and file types.
+
+2. Core Features
+2.1 Document & Data Handling
+•	Upload and process:
+o	Text documents (PDF, Word)
+o	Spreadsheets (CSV, Excel)
+o	Images (extract text, analyze content)
+o	Audio/Video files (summarize calls, meetings)
+•	Extract structured and unstructured data.
+•	Generate summaries, insights, and analytics from uploaded content.
+
+2.2 RAG Pipeline
+•	Vector Database Integration (e.g., Pinecone, Weaviate, FAISS).
+•	Chunking & Embedding:
+o	Split documents into chunks.
+o	Generate embeddings using LLM-compatible models.
+•	Retriever + Generator:
+o	Retrieve relevant context.
+o	Generate answers with confidence score.
+•	Support multi-turn conversations with context retention.
+2.3 Data Source Connectivity
+•	Connect to:
+o	SharePoint
+o	Confluence
+o	Azure Blob Storage
+o	AWS S3 Bucket
+o	REST APIs
+•	Enable file upload and real-time sync.
+2.4 Multi-Modal Analysis
+•	Images: OCR, object detection, insights.
+•	Audio/Video: Speech-to-text, summarization, key points extraction.
+2.5 Guardrails & Compliance
+•	Role-based access control.
+•	Data encryption (in transit & at rest).
+•	PII detection and masking.
+•	Configurable content moderation and policy enforcement.
+
+2.6 User Experience
+•	Chat Interface:
+o	Save conversations.
+o	Create personas for different roles (e.g., Analyst, Developer).
+•	Dashboard:
+o	View insights, analytics, and confidence scores.
+•	Export Options:
+o	Download summaries and reports.
+

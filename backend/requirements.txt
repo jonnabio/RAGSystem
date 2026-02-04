@@ -1,0 +1,26 @@
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# AI/ML
+lancedb==0.4.0
+openai==1.10.0  # For embeddings and API compatibility
+httpx==0.26.0   # For OpenRouter API calls
+
+# Document Processing
+PyMuPDF==1.23.0
+python-docx==1.1.0
+python-magic-bin==0.4.14  # Windows-compatible version
+
+# Data Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+
+# Utilities
+python-dotenv==1.0.0

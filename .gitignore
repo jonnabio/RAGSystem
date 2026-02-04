@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Data
+data/documents/*
+!data/documents/.gitkeep
+data/vectors/*
+!data/vectors/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
