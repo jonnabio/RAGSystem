@@ -3,15 +3,26 @@
 import { Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ConversationHistory from "../components/chat/ConversationHistory";
+import FeedbackButtons from "../components/chat/FeedbackButtons";
+import InteractiveCitations from "../components/chat/InteractiveCitations";
+import ThoughtProcess from "../components/chat/ThoughtProcess";
 import SystemTransparency from "../components/SystemTransparency";
 import { trackQuery } from "../lib/analytics";
 import { AppSettings, getSettings } from "../lib/settings";
+
+interface PipelineStep {
+  step: string;
+  label: string;
+  duration_ms: number;
+  details?: Record<string, unknown>;
+}
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
   confidence?: number;
+  pipeline_steps?: PipelineStep[];
   metadata?: {
     model: string;
     tokens: number;
@@ -23,6 +34,8 @@ interface Source {
   rank: number;
   text: string;
   score: number;
+  document_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface Conversation {
@@ -195,6 +208,7 @@ export default function ChatPage() {
           content: data.answer,
           sources: data.sources,
           confidence: data.confidence,
+          pipeline_steps: data.pipeline_steps,
           metadata: {
             model: data.model,
             tokens: data.tokens_used,
@@ -404,32 +418,18 @@ export default function ChatPage() {
                       {message.content}
                     </p>
 
-                    {/* Sources */}
+                    {/* Sources - Interactive Citations */}
                     {message.sources && message.sources.length > 0 && (
-                      <div className="mt-4 pt-4 border-t border-white/10">
-                        <p className="text-accent text-sm font-medium mb-2">
-                          📎 Sources ({message.sources.length})
-                        </p>
-                        <div className="space-y-2">
-                          {message.sources.map((source, idx) => (
-                            <div
-                              key={idx}
-                              className="text-xs text-slate-400 flex items-center gap-2"
-                            >
-                              <span className="text-accent">{idx + 1}.</span>
-                              <span className="truncate">
-                                {source.text.substring(0, 50)}...
-                              </span>
-                              <span className="text-slate-500">
-                                (Relevance: {(source.score * 100).toFixed(0)}%)
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <InteractiveCitations sources={message.sources} />
                     )}
 
-                    {/* Metadata */}
+                    {/* Thought Process */}
+                    {message.pipeline_steps &&
+                      message.pipeline_steps.length > 0 && (
+                        <ThoughtProcess steps={message.pipeline_steps} />
+                      )}
+
+                    {/* Metadata + Feedback */}
                     {message.metadata && (
                       <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center gap-3 text-xs">
                         {getConfidenceBadge(message.confidence)}
@@ -441,6 +441,15 @@ export default function ChatPage() {
                             Cost: ${message.metadata.cost.toFixed(4)}
                           </span>
                         )}
+                        <div className="ml-auto">
+                          <FeedbackButtons
+                            messageIndex={index}
+                            query={
+                              messages.find((m) => m.role === "user")?.content
+                            }
+                            answer={message.content}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

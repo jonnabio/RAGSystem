@@ -26,6 +26,14 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
 
 
+class PipelineStep(BaseModel):
+    """A single step in the RAG pipeline."""
+    step: str
+    label: str
+    duration_ms: float
+    details: Optional[Dict[str, Any]] = None
+
+
 class ChatResponse(BaseModel):
     """Chat response with sources and metadata."""
     answer: str
@@ -36,6 +44,7 @@ class ChatResponse(BaseModel):
     cost: Optional[float] = None
     retrieval_time_ms: float
     generation_time_ms: float
+    pipeline_steps: List[PipelineStep] = []
 
 
 class ChatService:
@@ -49,7 +58,8 @@ class ChatService:
         self,
         embedding_service: IEmbeddingService,
         vector_store: IVectorStore,
-        llm_client: ILLMClient
+        llm_client: ILLMClient,
+        reranking_service: Optional['RerankingService'] = None
     ):
         """
         Initialize chat service.
@@ -58,10 +68,12 @@ class ChatService:
             embedding_service: Service for generating query embeddings
             vector_store: Vector database for retrieval
             llm_client: LLM client for generation
+            reranking_service: Service for reranking (optional)
         """
         self.embeddings = embedding_service
         self.vector_store = vector_store
         self.llm = llm_client
+        self.reranker = reranking_service
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """
@@ -69,45 +81,82 @@ class ChatService:
 
         Pipeline:
         1. Embed query
-        2. Retrieve relevant chunks
-        3. Assemble context
-        4. Generate response
-        5. Calculate confidence
-
-        Args:
-            request: Chat request
-
-        Returns:
-            Chat response with answer and metadata
+        2. Retrieve relevant chunks (Hybrid/Vector)
+        3. Rerank (if enabled)
+        4. Assemble context
+        5. Generate response
+        6. Calculate confidence
         """
         import time
 
         logger.info(f"Processing chat request: {request.query[:50]}...")
+        pipeline_steps: List[PipelineStep] = []
 
         # Step 1: Embed query
-        retrieval_start = time.time()
+        step_start = time.time()
+        retrieval_start = step_start
 
         query_embedding = await self.embeddings.generate_embedding(request.query)
+        embed_time = (time.time() - step_start) * 1000
+        pipeline_steps.append(PipelineStep(
+            step="embedding", label="Embedding query", duration_ms=round(embed_time, 1)
+        ))
 
         # Step 2: Retrieve relevant chunks
+        step_start = time.time()
+        initial_k = 20 if self.reranker else request.max_context_chunks
+
         search_results = await self.vector_store.search(
             query_embedding=query_embedding,
-            limit=request.max_context_chunks
+            limit=initial_k
         )
-
-        retrieval_time = (time.time() - retrieval_start) * 1000
+        retrieval_step_time = (time.time() - step_start) * 1000
+        pipeline_steps.append(PipelineStep(
+            step="retrieval", label=f"Retrieving {initial_k} candidates",
+            duration_ms=round(retrieval_step_time, 1),
+            details={"candidates": len(search_results)}
+        ))
 
         if not search_results:
             logger.warning("No relevant chunks found for query")
-            return self._create_no_results_response(request, retrieval_time)
+            return self._create_no_results_response(request, (time.time() - retrieval_start) * 1000)
+
+        # Step 3: Rerank
+        if self.reranker:
+            step_start = time.time()
+            logger.info("Reranking results...")
+            chunks_to_rerank = [r.chunk for r in search_results]
+            reranked_chunks = self.reranker.rerank(
+                query=request.query,
+                documents=chunks_to_rerank,
+                top_k=request.max_context_chunks
+            )
+            final_results = []
+            for i, chunk in enumerate(reranked_chunks, start=1):
+                final_results.append(SearchResult(
+                    chunk=chunk,
+                    score=chunk.metadata.get("reranker_score", 0.99 - (i * 0.01)),
+                    rank=i
+                ))
+            search_results = final_results
+            rerank_time = (time.time() - step_start) * 1000
+            pipeline_steps.append(PipelineStep(
+                step="reranking",
+                label=f"Reranking → Top {len(search_results)}",
+                duration_ms=round(rerank_time, 1)
+            ))
+            logger.info(f"Reranking complete. Top {len(search_results)} kept.")
+
+        retrieval_time = (time.time() - retrieval_start) * 1000
 
         logger.info(f"Retrieved {len(search_results)} relevant chunks")
 
-        # Step 3: Assemble context
+        # Step 4: Assemble context
         context = self._assemble_context(search_results)
 
-        # Step 4: Generate response
-        generation_start = time.time()
+        # Step 5: Generate response
+        step_start = time.time()
+        generation_start = step_start
 
         messages = self._build_messages(
             query=request.query,
@@ -123,8 +172,14 @@ class ChatService:
         )
 
         generation_time = (time.time() - generation_start) * 1000
+        pipeline_steps.append(PipelineStep(
+            step="generation",
+            label=f"Generating with {request.model.split('/')[-1]}",
+            duration_ms=round(generation_time, 1),
+            details={"tokens": llm_response.tokens_used}
+        ))
 
-        # Step 5: Calculate confidence
+        # Step 6: Calculate confidence
         confidence = self._calculate_confidence(search_results, llm_response)
 
         # Build response
@@ -148,7 +203,8 @@ class ChatService:
             tokens_used=llm_response.tokens_used,
             cost=llm_response.cost,
             retrieval_time_ms=retrieval_time,
-            generation_time_ms=generation_time
+            generation_time_ms=generation_time,
+            pipeline_steps=pipeline_steps
         )
 
         logger.info(

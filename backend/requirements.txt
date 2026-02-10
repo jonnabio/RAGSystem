@@ -24,3 +24,8 @@ pytest-cov==4.1.0
 
 # Utilities
 python-dotenv==1.0.0
+
+# Hybrid Retrieval & Reranking
+tantivy==0.21.1
+sentence-transformers==2.3.1
+torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu

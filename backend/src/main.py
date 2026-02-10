@@ -21,6 +21,7 @@ from src.features.rag.infrastructure.lancedb_store import LanceDBVectorStore
 from src.features.rag.infrastructure.openrouter_client import OpenRouterClient
 from src.features.rag.domain.interfaces import Message
 from src.api.routers.system import router as system_router
+from src.api.routers.feedback import router as feedback_router
 from src.shared.pipeline_events import pipeline_tracker
 
 # Configure logging
@@ -54,6 +55,7 @@ app.add_middleware(
 
 # Register routers
 app.include_router(system_router)
+app.include_router(feedback_router)
 
 # Global services (singleton pattern)
 _document_service: Optional[DocumentService] = None
@@ -124,10 +126,22 @@ async def get_chat_service() -> ChatService:
             base_url=settings.OPENROUTER_BASE_URL
         )
 
+        # Initialize Reranking Service
+        reranking_service = None
+        try:
+            from src.features.rag.application.reranking_service import RerankingService
+            # We can use a setting to enable/disable, but for Phase 1 we enable by default if dependencies are there
+            reranking_service = RerankingService()
+        except ImportError:
+            logger.warning("Reranking dependencies not found, skipping RerankingService.")
+        except Exception as e:
+            logger.warning(f"Failed to initialize RerankingService: {e}")
+
         _chat_service = ChatService(
             embedding_service=embedding_service,
             vector_store=_vector_store,
-            llm_client=_openrouter_client
+            llm_client=_openrouter_client,
+            reranking_service=reranking_service
         )
 
     return _chat_service
