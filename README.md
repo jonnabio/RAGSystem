@@ -139,6 +139,8 @@ The system follows a **layered architecture** pattern:
 
 See `docs/adr/` for detailed architectural decisions.
 
+- [Detailed Architecture Overview](docs/architecture/rag_architecture_overview.md)
+
 ## 📖 API Documentation
 
 Once the backend is running, visit:
