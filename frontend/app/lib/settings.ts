@@ -20,7 +20,7 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   openRouterKey: "",
-  defaultModel: "google/gemini-2.0-flash-exp:free",
+  defaultModel: "nvidia/nemotron-3-nano-30b-a3b:free",
   temperature: 0.7,
   topP: 1,
   streamingEnabled: true,
@@ -72,7 +72,7 @@ export const saveSettings = (updates: Partial<AppSettings>): AppSettings => {
  * Resets all application data including settings, history, and analytics
  */
 export const resetAllSystemData = () => {
-  if (typeof globalThis.window === "undefined") return;
+  if (globalThis.window === undefined) return;
 
   // Clear core storage keys
   localStorage.removeItem(SETTINGS_KEY);

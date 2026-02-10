@@ -3,6 +3,7 @@
 import { Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ConversationHistory from "../components/chat/ConversationHistory";
+import SystemTransparency from "../components/SystemTransparency";
 import { trackQuery } from "../lib/analytics";
 import { AppSettings, getSettings } from "../lib/settings";
 
@@ -42,6 +43,7 @@ export default function ChatPage() {
   const [selectedModel, setSelectedModel] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string>();
+  const [showArchView, setShowArchView] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load settings on mount
@@ -216,14 +218,17 @@ export default function ChatPage() {
         setMessages(updatedMessages);
         updateConversation(updatedMessages);
       } else {
-        throw new Error("Failed to get response");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to get response");
       }
-    } catch (error) {
-      console.error("Error sending message:", error);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error("Error sending message:", err);
       const errorMessage: Message = {
         role: "assistant",
-        content:
-          "Sorry, I couldn't process your request. Please make sure the backend is running and documents are uploaded.",
+        content: err.message?.includes("rate-limited")
+          ? err.message
+          : "Sorry, I couldn't process your request. Please make sure the backend is running and documents are uploaded.",
       };
       const updatedMessages = [...newMessages, errorMessage];
       setMessages(updatedMessages);
@@ -307,28 +312,44 @@ export default function ChatPage() {
                          text-slate-200 outline-none cursor-pointer"
             >
               <option
-                value="meta-llama/llama-3-70b-instruct"
+                value="meta-llama/llama-3.3-70b-instruct:free"
                 className="bg-secondary"
               >
-                Llama 3 70B (Free)
+                Llama 3.3 70B (Free)
               </option>
               <option
-                value="mistralai/mistral-7b-instruct:free"
+                value="nvidia/nemotron-3-nano-30b-a3b:free"
                 className="bg-secondary"
               >
-                Mistral 7B (Free)
+                Nemotron 3 Nano (Free)
               </option>
-              <option value="google/gemma-7b-it:free" className="bg-secondary">
-                Gemma 7B (Free)
+              <option
+                value="mistralai/mistral-small-3.1-24b-instruct:free"
+                className="bg-secondary"
+              >
+                Mistral Small (Free)
               </option>
-              <option value="openai/gpt-4-turbo" className="bg-secondary">
-                GPT-4 Turbo
+              <option value="openai/gpt-4o" className="bg-secondary">
+                GPT-4o
               </option>
-              <option value="anthropic/claude-3-opus" className="bg-secondary">
-                Claude 3 Opus
+              <option
+                value="anthropic/claude-3.5-sonnet"
+                className="bg-secondary"
+              >
+                Claude 3.5 Sonnet
               </option>
             </select>
           </div>
+          <button
+            onClick={() => setShowArchView(!showArchView)}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
+              showArchView
+                ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300"
+                : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+            }`}
+          >
+            🏗️ Architect
+          </button>
         </div>
 
         {/* Messages */}
@@ -469,6 +490,24 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Architect's View Sidebar */}
+      {showArchView && (
+        <div className="w-[420px] border-l border-white/5 bg-black/20 p-5 overflow-y-auto custom-scrollbar">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-bold text-white">
+              🏗️ Architect&apos;s View
+            </h2>
+            <button
+              onClick={() => setShowArchView(false)}
+              className="text-slate-500 hover:text-white text-sm px-2"
+            >
+              ✕
+            </button>
+          </div>
+          <SystemTransparency />
+        </div>
+      )}
     </div>
   );
 }

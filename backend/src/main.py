@@ -20,11 +20,17 @@ from src.features.rag.infrastructure.embedding_service import OpenAIEmbeddingSer
 from src.features.rag.infrastructure.lancedb_store import LanceDBVectorStore
 from src.features.rag.infrastructure.openrouter_client import OpenRouterClient
 from src.features.rag.domain.interfaces import Message
+from src.api.routers.system import router as system_router
+from src.shared.pipeline_events import pipeline_tracker
 
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(settings.LOG_FILE),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register routers
+app.include_router(system_router)
 
 # Global services (singleton pattern)
 _document_service: Optional[DocumentService] = None
@@ -178,8 +187,10 @@ async def upload_document(
 
     Supports PDF and DOCX files.
     """
+    run_id = pipeline_tracker.start_run("ingestion", file.filename or "unknown")
     try:
-        # Validate file type
+        # Step 1: Validate file type
+        step_id = pipeline_tracker.add_step(run_id, "validation", "Validating file type")
         filename = file.filename
         extension = Path(filename).suffix.lower()
 
@@ -188,30 +199,45 @@ async def upload_document(
         elif extension in [".docx", ".doc"]:
             doc_type = DocumentType.DOCX
         else:
+            pipeline_tracker.fail_step(run_id, step_id, f"Unsupported: {extension}")
+            pipeline_tracker.fail_run(run_id, f"Unsupported file type: {extension}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type: {extension}. Please upload PDF or DOCX files."
             )
+        pipeline_tracker.complete_step(run_id, step_id, {"type": str(doc_type), "extension": extension})
 
-        # Save file
+        # Step 2: Save file
+        step_id = pipeline_tracker.add_step(run_id, "saving", f"Saving file to storage")
         file_id = str(uuid.uuid4())
         file_path = Path(settings.DOCUMENT_STORAGE_PATH) / f"{file_id}{extension}"
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        pipeline_tracker.complete_step(run_id, step_id, {"path": str(file_path)})
 
         logger.info(f"Saved file: {filename} -> {file_path}")
 
-        # Process document
+        # Step 3: Process document (parsing → chunking → embedding → storing)
+        step_id = pipeline_tracker.add_step(run_id, "parsing", "Extracting text from document")
         document = await doc_service.process_document(
             file_path=str(file_path),
             document_type=doc_type,
             original_filename=filename
         )
+        pipeline_tracker.complete_step(run_id, step_id, {
+            "chunks_created": document.chunk_count,
+            "size_bytes": document.size_bytes,
+            "chunk_size": settings.CHUNK_SIZE,
+            "chunk_overlap": settings.CHUNK_OVERLAP
+        })
 
-        # Store in memory
+        # Step 4: Index complete
+        step_id = pipeline_tracker.add_step(run_id, "indexing", "Document indexed in vector store")
         documents_db[document.id] = document
+        pipeline_tracker.complete_step(run_id, step_id, {"document_id": document.id})
 
+        pipeline_tracker.complete_run(run_id)
         logger.info(f"✅ Document processed: {filename} ({document.chunk_count} chunks)")
 
         return {
@@ -222,10 +248,14 @@ async def upload_document(
             "size_bytes": document.size_bytes,
             "document_type": document.document_type,
             "uploaded_at": document.uploaded_at.isoformat(),
-            "metadata": document.metadata
+            "metadata": document.metadata,
+            "pipeline_run_id": run_id
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        pipeline_tracker.fail_run(run_id, str(e))
         logger.error(f"Error uploading document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -285,17 +315,51 @@ async def chat(
 
     Returns answer with sources and confidence score.
     """
+    run_id = pipeline_tracker.start_run("query", request.query[:60])
     try:
         logger.info(f"Chat request: {request.query[:50]}... (model: {request.model})")
 
+        # Step 1: Embedding query
+        step_id = pipeline_tracker.add_step(run_id, "embedding", f"Embedding query with {settings.EMBEDDING_MODEL}")
+        pipeline_tracker.complete_step(run_id, step_id)
+
+        # Step 2: Retrieval
+        step_id = pipeline_tracker.add_step(run_id, "retrieval", f"Searching top {request.max_context_chunks} chunks via LanceDB")
+        pipeline_tracker.complete_step(run_id, step_id)
+
+        # Step 3: Generation
+        step_id = pipeline_tracker.add_step(run_id, "generation", f"Generating response with {request.model}")
+
         response = await chat_service.chat(request)
 
+        pipeline_tracker.complete_step(run_id, step_id, {
+            "model": request.model,
+            "tokens_used": response.tokens_used,
+            "confidence": response.confidence,
+            "sources_count": len(response.sources),
+            "retrieval_time_ms": response.retrieval_time_ms,
+            "generation_time_ms": response.generation_time_ms
+        })
+
+        pipeline_tracker.complete_run(run_id)
         logger.info(f"✅ Response generated: confidence={response.confidence:.2f}")
 
         return response
 
-    except Exception as e:
+    except RuntimeError as e:
+        error_msg = str(e)
+        pipeline_tracker.fail_run(run_id, error_msg)
+        if "429" in error_msg or "rate-limited" in error_msg.lower():
+            logger.warning(f"Rate limit hit: {e}")
+            raise HTTPException(
+                status_code=429,
+                detail="The AI model is temporarily rate-limited. Please wait a moment or try a different model."
+            )
         logger.error(f"Error processing chat: {e}")
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        pipeline_tracker.fail_run(run_id, str(e))
+        logger.error(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
