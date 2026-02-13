@@ -12,6 +12,9 @@ from src.features.rag.domain.interfaces import (
     IVectorStore,
     ILLMClient
 )
+from src.features.rag.application.query_decomposition_service import QueryDecompositionService
+from src.features.rag.application.router_service import QueryRouter
+from src.features.rag.application.reranking_service import RerankingService
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -59,7 +62,9 @@ class ChatService:
         embedding_service: IEmbeddingService,
         vector_store: IVectorStore,
         llm_client: ILLMClient,
-        reranking_service: Optional['RerankingService'] = None
+        reranking_service: Optional['RerankingService'] = None,
+        router_service: Optional['QueryRouter'] = None,
+        query_decomposer: Optional['QueryDecompositionService'] = None
     ):
         """
         Initialize chat service.
@@ -69,11 +74,15 @@ class ChatService:
             vector_store: Vector database for retrieval
             llm_client: LLM client for generation
             reranking_service: Service for reranking (optional)
+            router_service: Service for query routing (optional)
+            query_decomposer: Service for breaking down complex queries (optional)
         """
         self.embeddings = embedding_service
         self.vector_store = vector_store
         self.llm = llm_client
         self.reranker = reranking_service
+        self.router = router_service
+        self.decomposer = query_decomposer
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """
@@ -102,19 +111,108 @@ class ChatService:
             step="embedding", label="Embedding query", duration_ms=round(embed_time, 1)
         ))
 
-        # Step 2: Retrieve relevant chunks
+        # Step 2: Route query (Phase 4)
+        target_index = "technical_docs"
+        if self.router:
+            step_start = time.time()
+            try:
+                route_selection = await self.router.route_query(request.query)
+                target_index = route_selection.index_name
+                route_time = (time.time() - step_start) * 1000
+                pipeline_steps.append(PipelineStep(
+                    step="routing",
+                    label=f"Routing → {target_index.replace('_', ' ').title()}",
+                    duration_ms=round(route_time, 1),
+                    details={
+                        "index": target_index,
+                        "reason": route_selection.reason,
+                        "confidence": f"{route_selection.confidence:.2%}"
+                    }
+                ))
+            except Exception as e:
+                logger.error(f"Routing step failed: {e}")
+
+        # Step 3: Retrieve relevant chunks
+        # Step 3: Retrieval (Multi-hop / Decomposition)
         step_start = time.time()
         initial_k = 20 if self.reranker else request.max_context_chunks
 
-        search_results = await self.vector_store.search(
-            query_embedding=query_embedding,
-            limit=initial_k
-        )
+        # Check for decomposition
+        sub_queries = [request.query]
+        if self.decomposer:
+            decomp_start = time.time()
+            sub_queries = await self.decomposer.decompose_query(request.query)
+            if len(sub_queries) > 1:
+                pipeline_steps.append(PipelineStep(
+                    step="routing", # Re-using routing color for decomposition
+                    label=f"Decomposition → {len(sub_queries)} sub-queries",
+                    duration_ms=round((time.time() - decomp_start) * 1000, 1),
+                    details={"sub_queries": sub_queries}
+                ))
+
+        # Prepare embeddings for all queries
+        embeddings_map = {request.query: query_embedding}
+        if len(sub_queries) > 1:
+            for sq in sub_queries:
+                if sq not in embeddings_map:
+                    # We await sequentially for simplicity, but could be parallelized
+                    embeddings_map[sq] = await self.embeddings.generate_embedding(sq)
+
+        # Execute parallel searches
+        import asyncio
+        search_tasks = []
+        for sq in sub_queries:
+            search_tasks.append(
+                self._hybrid_search(
+                    query=sq,
+                    query_embedding=embeddings_map[sq],
+                    table_name=target_index,
+                    limit=initial_k
+                )
+            )
+
+        results_list = await asyncio.gather(*search_tasks)
+
+        # Deduplicate and merge results
+        unique_chunks = {}
+        hybrid_stats = {"vector_count": 0, "keyword_count": 0}
+
+        for res_set, stats_set in results_list:
+            hybrid_stats["vector_count"] += stats_set.get("vector_count", 0)
+            hybrid_stats["keyword_count"] += stats_set.get("keyword_count", 0)
+
+            for r in res_set:
+                if r.chunk.id not in unique_chunks:
+                    unique_chunks[r.chunk.id] = r
+                else:
+                    # Keep max score
+                    if r.score > unique_chunks[r.chunk.id].score:
+                        unique_chunks[r.chunk.id] = r
+
+                    # Merge retrieval methods metadata (e.g. vector, keyword)
+                    existing_methods = set(unique_chunks[r.chunk.id].metadata.get("retrieval_methods", []))
+                    new_methods = set(r.metadata.get("retrieval_methods", []))
+                    unique_chunks[r.chunk.id].metadata["retrieval_methods"] = list(existing_methods | new_methods)
+
+                if len(sub_queries) > 1:
+                    methods = unique_chunks[r.chunk.id].metadata.setdefault("retrieval_methods", [])
+                    if "multi-hop" not in methods:
+                        methods.append("multi-hop")
+
+        search_results = list(unique_chunks.values())
+        search_results.sort(key=lambda x: x.score, reverse=True)
+
         retrieval_step_time = (time.time() - step_start) * 1000
         pipeline_steps.append(PipelineStep(
-            step="retrieval", label=f"Retrieving {initial_k} candidates",
+            step="retrieval",
+            label=f"retrieved {len(search_results)} chunks (merged)",
             duration_ms=round(retrieval_step_time, 1),
-            details={"candidates": len(search_results)}
+            details={
+                "candidates": len(search_results),
+                "vector_hits": hybrid_stats["vector_count"],
+                "keyword_hits": hybrid_stats["keyword_count"],
+                "sources": len(sub_queries)
+            }
         ))
 
         if not search_results:
@@ -190,7 +288,10 @@ class ChatService:
                 "text": result.chunk.text[:200] + "..." if len(result.chunk.text) > 200 else result.chunk.text,
                 "score": result.score,
                 "rank": result.rank,
-                "metadata": result.chunk.metadata
+                "metadata": {
+                    **result.chunk.metadata,
+                    "retrieval_methods": result.metadata.get("retrieval_methods", [])
+                }
             }
             for result in search_results
         ]
@@ -338,3 +439,93 @@ class ChatService:
             retrieval_time_ms=retrieval_time,
             generation_time_ms=0.0
         )
+
+    async def _hybrid_search(
+        self,
+        query: str,
+        query_embedding: List[float],
+        table_name: str,
+        limit: int
+    ) -> tuple[List[SearchResult], Dict[str, Any]]:
+        """Execute parallel vector and keyword search and fuse results."""
+        import asyncio
+
+        # Run vector and keyword search in parallel
+        vector_task = self.vector_store.search(
+            query_embedding=query_embedding,
+            limit=limit,
+            table_name=table_name
+        )
+
+        keyword_task = self.vector_store.search_keyword(
+            query=query,
+            limit=limit,
+            table_name=table_name
+        )
+
+        vector_results, keyword_results = await asyncio.gather(vector_task, keyword_task)
+
+        logger.info(f"Hybrid retrieval: {len(vector_results)} vector, {len(keyword_results)} keyword results")
+
+        fused_results = self._rrf_fusion(vector_results, keyword_results, limit)
+
+        # Calculate visualization stats
+        stats = {
+            "vector_count": len(vector_results),
+            "keyword_count": len(keyword_results),
+            "total_fused": len(fused_results),
+            "vector_ids": [r.chunk.id for r in vector_results],
+            "keyword_ids": [r.chunk.id for r in keyword_results]
+        }
+
+        # Propagate method metadata to results
+        for res in fused_results:
+            methods = []
+            if res.chunk.id in stats["vector_ids"]:
+                methods.append("vector")
+            if res.chunk.id in stats["keyword_ids"]:
+                methods.append("keyword")
+            res.metadata["retrieval_methods"] = methods
+
+        return fused_results, stats
+
+    def _rrf_fusion(
+        self,
+        vector_results: List[SearchResult],
+        keyword_results: List[SearchResult],
+        limit: int,
+        k: int = 60
+    ) -> List[SearchResult]:
+        """Combines results using Reciprocal Rank Fusion."""
+        fused_scores = {}
+        chunks_map = {}
+
+        # Process Vector Results
+        for rank, result in enumerate(vector_results):
+            if result.chunk.id not in chunks_map:
+                chunks_map[result.chunk.id] = result.chunk
+
+            # score = 1 / (k + rank)
+            # rank is 0-indexed here from enumerate
+            fused_scores[result.chunk.id] = fused_scores.get(result.chunk.id, 0.0) + (1.0 / (k + rank + 1))
+
+        # Process Keyword Results
+        for rank, result in enumerate(keyword_results):
+            if result.chunk.id not in chunks_map:
+                chunks_map[result.chunk.id] = result.chunk
+
+            fused_scores[result.chunk.id] = fused_scores.get(result.chunk.id, 0.0) + (1.0 / (k + rank + 1))
+
+        # Sort by fused score
+        # x is chunk_id
+        sorted_ids = sorted(fused_scores.keys(), key=lambda x: fused_scores[x], reverse=True)
+
+        final_results = []
+        for i, chunk_id in enumerate(sorted_ids[:limit], start=1):
+            final_results.append(SearchResult(
+                chunk=chunks_map[chunk_id],
+                score=fused_scores[chunk_id],
+                rank=i
+            ))
+
+        return final_results

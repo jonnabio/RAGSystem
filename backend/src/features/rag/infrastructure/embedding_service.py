@@ -45,12 +45,11 @@ class OpenAIEmbeddingService:
             raise ValueError("Text cannot be empty")
 
         try:
-            print(f"DEBUG: Generating embedding for text (len={len(text)}) using model={self.model} base_url={self.client.base_url}")
             response = await self.client.embeddings.create(
                 model=self.model,
                 input=text.strip()
             )
-            print("DEBUG: Embedding received successfully")
+
 
             embedding = response.data[0].embedding
             logger.debug(f"Generated embedding with {len(embedding)} dimensions")
@@ -58,11 +57,9 @@ class OpenAIEmbeddingService:
             return embedding
 
         except openai.APIError as e:
-            print(f"DEBUG: API Error: {e}")
             logger.error(f"OpenAI API error: {e}")
             raise RuntimeError(f"Failed to generate embedding: {e}")
         except Exception as e:
-            print(f"DEBUG: Unexpected Error: {e}")
             logger.error(f"Unexpected error: {e}")
             raise RuntimeError(f"Embedding generation failed: {e}")
 
@@ -98,12 +95,11 @@ class OpenAIEmbeddingService:
             )
 
         try:
-            print(f"DEBUG: Batch embedding request for {len(cleaned_texts)} items using {self.model} at {self.client.base_url}")
             response = await self.client.embeddings.create(
                 model=self.model,
                 input=cleaned_texts
             )
-            print("DEBUG: Batch embedding success")
+
 
             embeddings = [item.embedding for item in response.data]
             logger.debug(f"Generated {len(embeddings)} embeddings")
@@ -111,11 +107,9 @@ class OpenAIEmbeddingService:
             return embeddings
 
         except openai.APIError as e:
-            print(f"DEBUG: Batch API Error: {e}")
             logger.error(f"OpenAI API error: {e}")
             raise RuntimeError(f"Failed to generate batch embeddings: {e}")
         except Exception as e:
-            print(f"DEBUG: Batch Unexpected Error: {e}")
             logger.error(f"Unexpected error: {e}")
             raise RuntimeError(f"Batch embedding generation failed: {e}")
 
@@ -135,12 +129,20 @@ class OpenAIEmbeddingService:
             List of all embeddings
         """
         all_embeddings = []
+        num_texts = len(texts)
+        num_batches = (num_texts + batch_size - 1) // batch_size
 
-        for i in range(0, len(texts), batch_size):
+        logger.info(f"Starting large batch embedding: {num_texts} texts in {num_batches} batches")
+
+        for i in range(0, num_texts, batch_size):
+            batch_num = i // batch_size + 1
             batch = texts[i:i + batch_size]
+
+            logger.info(f"Processing embedding batch {batch_num}/{num_batches} (size: {len(batch)})")
             embeddings = await self.generate_embeddings_batch(batch)
             all_embeddings.extend(embeddings)
 
-            logger.info(f"Processed batch {i//batch_size + 1}, total embeddings: {len(all_embeddings)}")
+            logger.debug(f"Progress: {len(all_embeddings)}/{num_texts} embeddings generated")
 
+        logger.info(f"Large batch embedding complete: {len(all_embeddings)} embeddings total")
         return all_embeddings

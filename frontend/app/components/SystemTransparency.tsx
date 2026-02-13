@@ -50,12 +50,26 @@ interface PipelineRun {
   started_at: string;
 }
 
+interface EvaluationResults {
+  timestamp: string;
+  scores: {
+    faithfulness: number;
+    answer_relevancy: number;
+    context_precision: number;
+  };
+  sample_count: number;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 export default function SystemTransparency() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
+  const [evalResults, setEvalResults] = useState<EvaluationResults | null>(
+    null,
+  );
+  const [isEvaluating, setIsEvaluating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -70,6 +84,11 @@ export default function SystemTransparency() {
       if (eventsRes.ok) {
         const data = await eventsRes.json();
         setRuns(data.runs || []);
+      }
+      const evalRes = await fetch(`${API_URL}/api/evaluation/results`);
+      if (evalRes.ok) {
+        const data = await evalRes.json();
+        if (data.scores) setEvalResults(data);
       }
     } catch {
       /* backend not reachable */
@@ -90,6 +109,23 @@ export default function SystemTransparency() {
       clearInterval(interval);
     };
   }, [fetchData]);
+
+  const runBenchmark = async () => {
+    setIsEvaluating(true);
+    try {
+      const res = await fetch(`${API_URL}/api/evaluation/run`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEvalResults(data);
+      }
+    } catch (e) {
+      console.error("Evaluation failed", e);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
 
   const stageIcons: Record<string, string> = {
     validation: "🔍",
@@ -260,6 +296,62 @@ export default function SystemTransparency() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* ── Quality Metrics (Ragas) ── */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <SectionTitle>Quality Metrics (Ragas)</SectionTitle>
+          <button
+            onClick={runBenchmark}
+            disabled={isEvaluating}
+            className={`text-[10px] px-2 py-0.5 rounded border border-accent/30 text-accent hover:bg-accent/10 transition-colors disabled:opacity-50`}
+          >
+            {isEvaluating ? "Evaluating..." : "Run Benchmark"}
+          </button>
+        </div>
+        <div className="bg-white/5 rounded-xl p-4 space-y-4">
+          {!evalResults ? (
+            <p className="text-slate-500 italic text-[12px]">
+              No evaluation results yet. Run a benchmark to measure RAG quality.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-emerald-400">
+                    {(evalResults.scores.faithfulness * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-[10px] text-slate-400 uppercase">
+                    Faithfulness
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-amber-400">
+                    {(evalResults.scores.answer_relevancy * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-[10px] text-slate-400 uppercase">
+                    Relevance
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-indigo-400">
+                    {(evalResults.scores.context_precision * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-[10px] text-slate-400 uppercase">
+                    Precision
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-white/5 flex justify-between items-center text-[10px] text-slate-500">
+                <span>
+                  Last Run: {new Date(evalResults.timestamp).toLocaleString()}
+                </span>
+                <span>n={evalResults.sample_count} samples</span>
+              </div>
+            </>
+          )}
+        </div>
       </section>
 
       {/* ── Storage Metrics ── */}

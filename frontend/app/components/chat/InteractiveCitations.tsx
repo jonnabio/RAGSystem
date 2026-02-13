@@ -35,6 +35,31 @@ function getRelevanceBadge(score: number) {
   }
 }
 
+function getRetrievalBadge(method: string) {
+  switch (method) {
+    case "vector":
+      return {
+        label: "Vector",
+        className: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+      };
+    case "keyword":
+      return {
+        label: "Keyword",
+        className: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+      };
+    case "multi-hop":
+      return {
+        label: "Multi-Hop",
+        className: "bg-pink-500/20 text-pink-400 border-pink-500/30",
+      };
+    default:
+      return {
+        label: method,
+        className: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+      };
+  }
+}
+
 function getSourceIcon(metadata?: Record<string, unknown>) {
   const source = metadata?.source_type as string | undefined;
   if (source === "pdf" || source === "PDF") return "📄";
@@ -117,10 +142,24 @@ export default function InteractiveCitations({
                   <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
                     {source.text}
                   </p>
-                  <div className="mt-2 flex items-center gap-3 text-[10px] text-slate-500">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
                     <span>Score: {source.score.toFixed(4)}</span>
                     {source.document_id && (
                       <span>Doc: {source.document_id.substring(0, 8)}...</span>
+                    )}
+                    {/* Retrieval Methods */}
+                    {(source.metadata?.retrieval_methods as string[])?.map(
+                      (method) => {
+                        const badge = getRetrievalBadge(method);
+                        return (
+                          <span
+                            key={method}
+                            className={`px-1.5 py-0.5 rounded border ${badge.className}`}
+                          >
+                            {badge.label}
+                          </span>
+                        );
+                      },
                     )}
                   </div>
                 </div>

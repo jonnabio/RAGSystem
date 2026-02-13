@@ -22,6 +22,10 @@ from src.features.rag.infrastructure.openrouter_client import OpenRouterClient
 from src.features.rag.domain.interfaces import Message
 from src.api.routers.system import router as system_router
 from src.api.routers.feedback import router as feedback_router
+from src.api.routers.evaluation import router as evaluation_router
+from src.features.rag.application.router_service import QueryRouter
+from src.features.rag.application.query_decomposition_service import QueryDecompositionService
+from src.features.documents.application.redaction_service import RedactionService
 from src.shared.pipeline_events import pipeline_tracker
 
 # Configure logging
@@ -56,6 +60,7 @@ app.add_middleware(
 # Register routers
 app.include_router(system_router)
 app.include_router(feedback_router)
+app.include_router(evaluation_router)
 
 # Global services (singleton pattern)
 _document_service: Optional[DocumentService] = None
@@ -91,13 +96,17 @@ async def get_document_service() -> DocumentService:
             model=settings.EMBEDDING_MODEL
         )
 
+        # Initialize Redaction Service
+        redaction_service = RedactionService()
+
         _document_service = DocumentService(
             pdf_processor=pdf_processor,
             word_processor=word_processor,
             chunking_strategy=chunking_strategy,
             embedding_service=embedding_service,
             vector_store=_vector_store,
-            storage_path=settings.DOCUMENT_STORAGE_PATH
+            storage_path=settings.DOCUMENT_STORAGE_PATH,
+            redaction_service=redaction_service
         )
 
     return _document_service
@@ -130,18 +139,23 @@ async def get_chat_service() -> ChatService:
         reranking_service = None
         try:
             from src.features.rag.application.reranking_service import RerankingService
-            # We can use a setting to enable/disable, but for Phase 1 we enable by default if dependencies are there
             reranking_service = RerankingService()
-        except ImportError:
-            logger.warning("Reranking dependencies not found, skipping RerankingService.")
         except Exception as e:
-            logger.warning(f"Failed to initialize RerankingService: {e}")
+            logger.warning(f"Reranking not available: {e}")
+
+        # Initialize Query Router (Phase 4)
+        router_service = QueryRouter(llm_client=_openrouter_client)
+
+        # Initialize Query Decomposer (Phase 5)
+        decomposition_service = QueryDecompositionService(llm_client=_openrouter_client)
 
         _chat_service = ChatService(
             embedding_service=embedding_service,
             vector_store=_vector_store,
             llm_client=_openrouter_client,
-            reranking_service=reranking_service
+            reranking_service=reranking_service,
+            router_service=router_service,
+            query_decomposer=decomposition_service
         )
 
     return _chat_service
@@ -194,7 +208,8 @@ async def health_check():
 @app.post("/api/documents/upload", response_model=Dict)
 async def upload_document(
     file: UploadFile = File(...),
-    doc_service: DocumentService = Depends(get_document_service)
+    doc_service: DocumentService = Depends(get_document_service),
+    tenant_id: str = "default"  # Assuming tenant_id passed as query param for validatiom or header via Depends
 ):
     """
     Upload and process a document.
@@ -232,39 +247,74 @@ async def upload_document(
 
         logger.info(f"Saved file: {filename} -> {file_path}")
 
+        # Step 2.5: Check for duplicates via Content Hashing
+        content_hash = doc_service.calculate_hash(str(file_path))
+
+        # Check matching hash AND tenant_id
+        for existing_doc in documents_db.values():
+            if existing_doc.tenant_id == tenant_id and existing_doc.content_hash == content_hash:
+                logger.info(f"Duplicate document found: {existing_doc.id} (hash: {content_hash})")
+
+                # Cleanup uploaded duplicate
+                try:
+                    Path(file_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+                pipeline_tracker.complete_run(run_id, {"status": "duplicate", "original_id": existing_doc.id})
+
+                return {
+                    "id": existing_doc.id,
+                    "filename": existing_doc.filename,
+                    "status": "existing", # Signal frontend it's a duplicate
+                    "chunk_count": existing_doc.chunk_count,
+                    "size_bytes": existing_doc.size_bytes,
+                    "document_type": str(existing_doc.document_type),
+                    "uploaded_at": existing_doc.uploaded_at.isoformat(),
+                    "metadata": existing_doc.metadata,
+                    "pipeline_run_id": run_id,
+                    "message": "Document already exists"
+                }
+
         # Step 3: Process document (parsing → chunking → embedding → storing)
-        step_id = pipeline_tracker.add_step(run_id, "parsing", "Extracting text from document")
-        document = await doc_service.process_document(
-            file_path=str(file_path),
-            document_type=doc_type,
-            original_filename=filename
-        )
-        pipeline_tracker.complete_step(run_id, step_id, {
-            "chunks_created": document.chunk_count,
-            "size_bytes": document.size_bytes,
-            "chunk_size": settings.CHUNK_SIZE,
-            "chunk_overlap": settings.CHUNK_OVERLAP
-        })
+        step_id = pipeline_tracker.add_step(run_id, "processing", "Processing document chunks")
+        try:
+            document = await doc_service.process_document(
+                file_path=str(file_path),
+                document_type=doc_type,
+                original_filename=filename,
+                tenant_id=tenant_id,
+                content_hash=content_hash
+            )
+            pipeline_tracker.complete_step(run_id, step_id, {
+                "chunks_created": document.chunk_count,
+                "size_bytes": document.size_bytes
+            })
 
-        # Step 4: Index complete
-        step_id = pipeline_tracker.add_step(run_id, "indexing", "Document indexed in vector store")
-        documents_db[document.id] = document
-        pipeline_tracker.complete_step(run_id, step_id, {"document_id": document.id})
+            # Step 4: Index complete
+            step_id = pipeline_tracker.add_step(run_id, "indexing", "Document indexed in vector store")
+            documents_db[document.id] = document
+            pipeline_tracker.complete_step(run_id, step_id, {"document_id": document.id})
 
-        pipeline_tracker.complete_run(run_id)
-        logger.info(f"✅ Document processed: {filename} ({document.chunk_count} chunks)")
+            pipeline_tracker.complete_run(run_id)
+            logger.info(f"✅ Document processed: {filename} ({document.chunk_count} chunks)")
 
-        return {
-            "id": document.id,
-            "filename": document.filename,
-            "status": document.status,
-            "chunk_count": document.chunk_count,
-            "size_bytes": document.size_bytes,
-            "document_type": document.document_type,
-            "uploaded_at": document.uploaded_at.isoformat(),
-            "metadata": document.metadata,
-            "pipeline_run_id": run_id
-        }
+            return {
+                "id": document.id,
+                "filename": document.filename,
+                "status": str(document.status),
+                "chunk_count": document.chunk_count,
+                "size_bytes": document.size_bytes,
+                "document_type": str(document.document_type),
+                "uploaded_at": document.uploaded_at.isoformat(),
+                "metadata": document.metadata,
+                "pipeline_run_id": run_id
+            }
+        except Exception as e:
+            logger.error(f"Processing failed for {filename}: {e}")
+            pipeline_tracker.fail_step(run_id, step_id, str(e))
+            pipeline_tracker.fail_run(run_id, str(e))
+            raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
 
     except HTTPException:
         raise
@@ -295,7 +345,8 @@ async def list_documents():
 @app.delete("/api/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    doc_service: DocumentService = Depends(get_document_service)
+    doc_service: DocumentService = Depends(get_document_service),
+    tenant_id: str = "default"
 ):
     """Delete a document and all its chunks."""
     if document_id not in documents_db:
@@ -303,7 +354,7 @@ async def delete_document(
 
     try:
         # Delete from vector store
-        await doc_service.delete_document(document_id)
+        await doc_service.delete_document(document_id, tenant_id=tenant_id)
 
         # Remove from memory
         del documents_db[document_id]

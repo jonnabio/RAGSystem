@@ -11,6 +11,7 @@ class SearchResult(BaseModel):
     chunk: Chunk
     score: float
     rank: int
+    metadata: Dict[str, Any] = {}
 
     class Config:
         json_schema_extra = {
@@ -109,7 +110,8 @@ class IVectorStore(Protocol):
         self,
         query_embedding: List[float],
         limit: int = 5,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None
     ) -> List[SearchResult]:
         """
         Search for similar chunks using vector similarity.
@@ -118,9 +120,31 @@ class IVectorStore(Protocol):
             query_embedding: Query vector
             limit: Maximum number of results
             filters: Optional metadata filters
+            table_name: Specialized table to search in
 
         Returns:
             List of search results, ranked by similarity
+        """
+        ...
+
+    async def search_keyword(
+        self,
+        query: str,
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None
+    ) -> List[SearchResult]:
+        """
+        Search for chunks using keyword matching (FTS).
+
+        Args:
+            query: Text query
+            limit: Maximum number of results
+            filters: Optional metadata filters
+            table_name: Specialized table to search in
+
+        Returns:
+            List of search results, ranked by relevance
         """
         ...
 

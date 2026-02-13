@@ -44,20 +44,52 @@ async def system_info() -> Dict[str, Any]:
 @router.get("/stats")
 async def system_stats() -> Dict[str, Any]:
     """Return aggregate storage and usage statistics."""
-    from src.main import documents_db, _vector_store
+    try:
+        import src.main
 
-    total_chunks = 0
-    if _vector_store and _vector_store.table is not None:
-        try:
-            total_chunks = _vector_store.table.count_rows()
-        except Exception:
-            pass
+        # Access globals cleanly
+        documents_db = getattr(src.main, "documents_db", {})
+        _vector_store = getattr(src.main, "_vector_store", None)
 
-    return {
-        "documents_indexed": len(documents_db),
-        "total_chunks": total_chunks,
-        "vector_db_status": "connected" if (_vector_store and _vector_store.db) else "disconnected",
-    }
+        total_chunks = 0
+        vdb_connected = False
+
+        if _vector_store and hasattr(_vector_store, "db") and _vector_store.db:
+            vdb_connected = True
+            try:
+                table_name = getattr(_vector_store, "default_table_name", "technical_docs")
+                # Use list_tables() if available, fallback to table_names()
+                tables = []
+                if hasattr(_vector_store.db, "list_tables"):
+                    tables = _vector_store.db.list_tables()
+                elif hasattr(_vector_store.db, "table_names"):
+                    tables = _vector_store.db.table_names()
+
+                if table_name in tables:
+                     tbl = _vector_store.db.open_table(table_name)
+                     # Use count_rows() or fallback to len()
+                     if hasattr(tbl, "count_rows"):
+                         total_chunks = tbl.count_rows()
+                     else:
+                         total_chunks = len(tbl)
+            except Exception as e:
+                logger.warning(f"Error reading chunks count: {e}")
+
+        return {
+            "documents_indexed": len(documents_db),
+            "total_chunks": total_chunks,
+            "vector_db_status": "connected" if vdb_connected else "disconnected",
+        }
+    except Exception as e:
+        logger.error(f"Error in system_stats: {e}")
+        return {
+            "documents_indexed": 0,
+            "total_chunks": 0,
+            "vector_db_status": "error",
+            "error": str(e)
+        }
+
+
 
 
 @router.get("/health")

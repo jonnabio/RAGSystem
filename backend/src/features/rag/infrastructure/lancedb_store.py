@@ -18,18 +18,18 @@ class LanceDBVectorStore:
     Provides CRUD operations and similarity search on document chunks.
     """
 
-    def __init__(self, db_path: str, table_name: str = "chunks"):
+    def __init__(self, db_path: str, default_table_name: str = "technical_docs"):
         """
         Initialize LanceDB vector store.
 
         Args:
             db_path: Path to LanceDB database directory
-            table_name: Name of the table for chunks
+            default_table_name: Default table name to use if none specified
         """
         self.db_path = Path(db_path)
-        self.table_name = table_name
+        self.default_table_name = default_table_name
         self.db = None
-        self.table = None
+        self._tables = {}  # Cache for opened tables
 
         # Ensure directory exists
         self.db_path.mkdir(parents=True, exist_ok=True)
@@ -42,30 +42,23 @@ class LanceDBVectorStore:
         """Synchronous initialization."""
         try:
             self.db = lancedb.connect(str(self.db_path))
-
-            # Check if table exists
-            table_names = self.db.table_names()
-
-            if self.table_name in table_names:
-                self.table = self.db.open_table(self.table_name)
-                logger.info(f"Opened existing table '{self.table_name}'")
-            else:
-                logger.info(f"Table '{self.table_name}' will be created on first add")
-
+            logger.info(f"Connected to LanceDB at {self.db_path}")
         except Exception as e:
             logger.error(f"Error initializing LanceDB: {e}")
             raise RuntimeError(f"Failed to initialize vector store: {e}")
 
-    async def add_chunks(self, chunks: List[Chunk]) -> None:
+    async def add_chunks(self, chunks: List[Chunk], table_name: Optional[str] = None) -> None:
         """
         Add chunks to vector store.
 
         Args:
             chunks: List of chunks with embeddings
+            table_name: Name of the table (defaults to technical_docs)
 
         Raises:
             ValueError: If chunks don't have embeddings
         """
+        logger.info(f"Adding {len(chunks)} chunks to vector store (table={table_name or self.default_table_name})")
         if not chunks:
             return
 
@@ -76,29 +69,55 @@ class LanceDBVectorStore:
 
         # Convert chunks to LanceDB format
         data = []
+
+        # Fixed set of allowed metadata fields based on existing schema
+        ALLOWED_METADATA_FIELDS = {
+            "author", "creationDate", "creator", "filename", "format",
+            "keywords", "modDate", "page_count", "producer",
+            "subject", "title", "trapped", "word_count"
+        }
+
         for chunk in chunks:
+            # Sanitize metadata: only keep allowed fields
+            sanitized_metadata = {
+                k: v for k, v in chunk.metadata.items()
+                if k in ALLOWED_METADATA_FIELDS
+            }
+
+            # Ensure all allowed fields are present (default to empty string or 0)
+            for field in ALLOWED_METADATA_FIELDS:
+                if field not in sanitized_metadata:
+                    if field in ["page_count", "word_count"]:
+                        sanitized_metadata[field] = 0
+                    else:
+                        sanitized_metadata[field] = ""
+
             data.append({
                 "id": chunk.id,
+                "tenant_id": chunk.tenant_id,
                 "document_id": chunk.document_id,
                 "chunk_index": chunk.chunk_index,
                 "text": chunk.text,
                 "vector": chunk.embedding,
-                "metadata": chunk.metadata,
+                "metadata": sanitized_metadata,
                 "created_at": chunk.created_at.isoformat()
             })
 
-        await asyncio.to_thread(self._add_data_sync, data)
-        logger.info(f"Added {len(chunks)} chunks to vector store")
+        target_table = table_name or self.default_table_name
+        await asyncio.to_thread(self._add_data_sync, data, target_table)
+        logger.info(f"Added {len(chunks)} chunks to table '{target_table}'")
 
-    def _add_data_sync(self, data: List[Dict[str, Any]]) -> None:
+    def _add_data_sync(self, data: List[Dict[str, Any]], table_name: str) -> None:
         """Synchronous data addition."""
         try:
-            if self.table is None:
-                # Create table with first batch
-                self.table = self.db.create_table(self.table_name, data=data)
+            if table_name not in self.db.table_names():
+                logger.info(f"Creating new table '{table_name}'")
+                table = self.db.create_table(table_name, data=data)
+                self._tables[table_name] = table
             else:
-                # Add to existing table
-                self.table.add(data)
+                table = self._tables.get(table_name) or self.db.open_table(table_name)
+                table.add(data)
+                self._tables[table_name] = table
         except Exception as e:
             logger.error(f"Error adding data to LanceDB: {e}")
             raise RuntimeError(f"Failed to add chunks: {e}")
@@ -107,7 +126,9 @@ class LanceDBVectorStore:
         self,
         query_embedding: List[float],
         limit: int = 5,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
     ) -> List[SearchResult]:
         """
         Search for similar chunks using vector similarity.
@@ -115,37 +136,155 @@ class LanceDBVectorStore:
         Args:
             query_embedding: Query vector
             limit: Maximum number of results
-            filters: Optional metadata filters (e.g., {"document_id": "doc-123"})
-
-        Returns:
-            List of search results, ranked by similarity score
+            limit: Maximum number of results
+            filters: Optional metadata filters
+            table_name: Specialized table to search in
+            tenant_id: Optional[str] = None
         """
         if not query_embedding:
             raise ValueError("Query embedding cannot be empty")
 
-        if self.table is None:
-            logger.warning("No table exists, returning empty results")
-            return []
+        # Enforce tenant isolation if provided
+        final_filters = filters or {}
+        if tenant_id:
+            final_filters["tenant_id"] = tenant_id
+
+        target_table = table_name or self.default_table_name
+
+        if target_table not in self.db.table_names():
+            logger.warning(f"Table '{target_table}' does not exist, searching in '{self.default_table_name}'")
+            target_table = self.default_table_name
+            if target_table not in self.db.table_names():
+                return []
 
         results = await asyncio.to_thread(
             self._search_sync,
             query_embedding,
             limit,
-            filters
+            final_filters,
+            target_table
         )
 
         return results
+
+    async def search_keyword(
+        self,
+        query: str,
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
+    ) -> List[SearchResult]:
+        """
+        Search for chunks using keyword matching (FTS).
+
+        Args:
+            query: Text query
+            limit: Maximum number of results
+            filters: Optional metadata filters
+            table_name: Specialized table to search in
+            tenant_id: Optional[str] = None
+        """
+        if not query:
+            return []
+
+        # Enforce tenant isolation if provided
+        final_filters = filters or {}
+        if tenant_id:
+            final_filters["tenant_id"] = tenant_id
+
+        target_table = table_name or self.default_table_name
+
+        if target_table not in self.db.table_names():
+            logger.warning(f"Table '{target_table}' does not exist, FTS search skipped.")
+            return []
+
+        results = await asyncio.to_thread(
+            self._search_keyword_sync,
+            query,
+            limit,
+            final_filters,
+            target_table
+        )
+
+        return results
+
+    def _search_keyword_sync(
+        self,
+        query: str,
+        limit: int,
+        filters: Optional[Dict[str, Any]],
+        table_name: str
+    ) -> List[SearchResult]:
+        """Synchronous keyword search."""
+        try:
+            table = self._tables.get(table_name) or self.db.open_table(table_name)
+            self._tables[table_name] = table
+
+            # Create FTS index if it doesn't exist
+            try:
+                table.create_fts_index("text")
+            except Exception:
+                pass
+
+            # FTS search
+            search_query = table.search(query).limit(limit)
+
+            # Apply filters if provided
+            if filters:
+                filter_str = " AND ".join([
+                    f"{k} = '{v}'" if isinstance(v, str) else f"{k} = {v}"
+                    for k, v in filters.items()
+                ])
+                search_query = search_query.where(filter_str)
+
+            results = search_query.to_list()
+
+            # Convert to SearchResult objects
+            search_results = []
+            for rank, result in enumerate(results, start=1):
+                chunk = Chunk(
+                    id=result["id"],
+                    document_id=result["document_id"],
+                    chunk_index=result["chunk_index"],
+                    text=result["text"],
+                    embedding=result["vector"],
+                    metadata=result.get("metadata", {})
+                )
+
+                search_results.append(SearchResult(
+                    chunk=chunk,
+                    score=float(result.get("score", 0.0)),  # FTS score if available
+                    rank=rank
+                ))
+
+            logger.info(f"Found {len(search_results)} FTS matches")
+            return search_results
+
+        except Exception as e:
+            logger.error(f"Error searching LanceDB FTS: {e}")
+            return []
 
     def _search_sync(
         self,
         query_embedding: List[float],
         limit: int,
-        filters: Optional[Dict[str, Any]]
+        filters: Optional[Dict[str, Any]],
+        table_name: str
     ) -> List[SearchResult]:
         """Synchronous search."""
         try:
-            # Perform vector search
-            query = self.table.search(query_embedding).limit(limit)
+            table = self._tables.get(table_name) or self.db.open_table(table_name)
+            self._tables[table_name] = table
+
+            # Create FTS index if it doesn't exist
+            try:
+                table.create_fts_index("text")
+            except Exception:
+                pass
+
+            # Default to vector search
+            query = table.search(query_embedding).limit(limit)
 
             # Apply filters if provided
             if filters:
@@ -182,48 +321,63 @@ class LanceDBVectorStore:
             logger.error(f"Error searching LanceDB: {e}")
             return []
 
-    async def delete_document(self, document_id: str) -> None:
+    async def delete_document(
+        self,
+        document_id: str,
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
+    ) -> None:
         """
         Delete all chunks for a document.
 
         Args:
             document_id: Document ID to delete
+            table_name: Specialized table to delete from
+            tenant_id: Optional tenant ID validation
         """
-        if self.table is None:
-            logger.warning("No table exists, nothing to delete")
+        target_table = table_name or self.default_table_name
+        if target_table not in self.db.table_names():
             return
 
-        await asyncio.to_thread(self._delete_sync, document_id)
-        logger.info(f"Deleted chunks for document {document_id}")
+        delete_filter = f"document_id = '{document_id}'"
+        if tenant_id:
+            delete_filter += f" AND tenant_id = '{tenant_id}'"
 
-    def _delete_sync(self, document_id: str) -> None:
+        await asyncio.to_thread(self._delete_sync, delete_filter, target_table)
+        logger.info(f"Deleted chunks for document {document_id} from table '{target_table}'")
+
+    def _delete_sync(self, delete_filter: str, table_name: str) -> None:
         """Synchronous delete."""
         try:
-            self.table.delete(f"document_id = '{document_id}'")
+            table = self._tables.get(table_name) or self.db.open_table(table_name)
+            table.delete(delete_filter)
         except Exception as e:
             logger.error(f"Error deleting from LanceDB: {e}")
             raise RuntimeError(f"Failed to delete document chunks: {e}")
 
-    async def get_document_chunks(self, document_id: str) -> List[Chunk]:
+    async def get_document_chunks(self, document_id: str, table_name: Optional[str] = None) -> List[Chunk]:
         """
         Get all chunks for a document.
 
         Args:
             document_id: Document ID
+            table_name: Specialized table to search in
 
         Returns:
             List of chunks
         """
-        if self.table is None:
+        target_table = table_name or self.default_table_name
+        if target_table not in self.db.table_names():
             return []
 
-        chunks = await asyncio.to_thread(self._get_chunks_sync, document_id)
+        chunks = await asyncio.to_thread(self._get_chunks_sync, document_id, target_table)
         return chunks
 
-    def _get_chunks_sync(self, document_id: str) -> List[Chunk]:
+    def _get_chunks_sync(self, document_id: str, table_name: str) -> List[Chunk]:
         """Synchronous chunk retrieval."""
         try:
-            results = self.table.search().where(
+            table = self._tables.get(table_name) or self.db.open_table(table_name)
+            results = table.search().where(
                 f"document_id = '{document_id}'"
             ).to_list()
 

@@ -55,7 +55,7 @@ class WordProcessor:
                 logger.warning(f"No text extracted from {file_path}")
                 return ""
 
-            return "\\n\\n".join(paragraphs)
+            return "\n\n".join(paragraphs)
 
         except PackageNotFoundError:
             raise RuntimeError(f"Invalid or corrupted DOCX file: {file_path}")
@@ -81,20 +81,17 @@ class WordProcessor:
 
             metadata = {
                 "format": "DOCX",
-                "author": core_props.author,
-                "title": core_props.title,
-                "subject": core_props.subject,
-                "keywords": core_props.keywords,
-                "created": core_props.created.isoformat() if core_props.created else None,
-                "modified": core_props.modified.isoformat() if core_props.modified else None,
-                "last_modified_by": core_props.last_modified_by,
-                "revision": core_props.revision,
-                "paragraph_count": len(doc.paragraphs),
-                "table_count": len(doc.tables)
+                "author": core_props.author or "",
+                "title": core_props.title or "",
+                "subject": core_props.subject or "",
+                "keywords": core_props.keywords or "",
+                "creationDate": core_props.created.isoformat() if core_props.created else "",
+                "modDate": core_props.modified.isoformat() if core_props.modified else "",
+                "creator": "python-docx",
+                "producer": "python-docx",
+                "page_count": 0,
+                "word_count": sum(len(p.text.split()) for p in doc.paragraphs)
             }
-
-            # Clean up None values
-            metadata = {k: v for k, v in metadata.items() if v is not None}
 
             return metadata
 

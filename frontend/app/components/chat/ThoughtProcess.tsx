@@ -14,6 +14,7 @@ interface ThoughtProcessProps {
 }
 
 const STEP_ICONS: Record<string, string> = {
+  routing: "🛣️",
   embedding: "🔤",
   retrieval: "🔍",
   reranking: "🎯",
@@ -21,6 +22,7 @@ const STEP_ICONS: Record<string, string> = {
 };
 
 const STEP_COLORS: Record<string, string> = {
+  routing: "from-indigo-500/20 to-indigo-600/10 border-indigo-500/30",
   embedding: "from-blue-500/20 to-blue-600/10 border-blue-500/30",
   retrieval: "from-emerald-500/20 to-emerald-600/10 border-emerald-500/30",
   reranking: "from-amber-500/20 to-amber-600/10 border-amber-500/30",
@@ -28,6 +30,7 @@ const STEP_COLORS: Record<string, string> = {
 };
 
 const STEP_TEXT_COLORS: Record<string, string> = {
+  routing: "text-indigo-400",
   embedding: "text-blue-400",
   retrieval: "text-emerald-400",
   reranking: "text-amber-400",
@@ -36,6 +39,7 @@ const STEP_TEXT_COLORS: Record<string, string> = {
 
 export default function ThoughtProcess({ steps }: ThoughtProcessProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [expandedStepIdx, setExpandedStepIdx] = useState<number | null>(null);
 
   if (!steps || steps.length === 0) return null;
 
@@ -68,29 +72,53 @@ export default function ThoughtProcess({ steps }: ThoughtProcessProps) {
 
             // Calculate width as percentage of total time (min 15% for visibility)
             const widthPct = Math.max(15, (step.duration_ms / totalTime) * 100);
+            const isStepExpanded = expandedStepIdx === idx;
 
             return (
-              <div key={idx} className="flex items-center gap-2">
-                {/* Timeline connector */}
-                <div className="flex flex-col items-center w-5">
-                  <span className="text-xs">{icon}</span>
-                  {idx < steps.length - 1 && (
-                    <div className="w-px h-3 bg-white/10 mt-0.5" />
-                  )}
+              <div key={idx} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  {/* Timeline connector */}
+                  <div className="flex flex-col items-center w-5">
+                    <span className="text-xs">{icon}</span>
+                    {idx < steps.length - 1 && (
+                      <div className="w-px h-3 bg-white/10 mt-0.5" />
+                    )}
+                  </div>
+
+                  {/* Step bar */}
+                  <div
+                    className={`flex-1 flex max-w-full`}
+                    onClick={() =>
+                      setExpandedStepIdx(isStepExpanded ? null : idx)
+                    }
+                  >
+                    <div
+                      className={`flex items-center justify-between px-2.5 py-1 rounded-md border bg-gradient-to-r ${bgColor} cursor-pointer hover:brightness-110 transition-all`}
+                      style={{ width: `${widthPct}%`, minWidth: "180px" }}
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <span
+                          className={`text-xs font-medium ${textColor} truncate`}
+                        >
+                          {step.label}
+                        </span>
+                        {step.details && (
+                          <span className="text-[10px] text-white/40">ⓘ</span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-500 ml-2 whitespace-nowrap">
+                        {step.duration_ms.toFixed(0)}ms
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Step bar */}
-                <div
-                  className={`flex items-center justify-between px-2.5 py-1 rounded-md border bg-gradient-to-r ${bgColor}`}
-                  style={{ width: `${widthPct}%`, minWidth: "140px" }}
-                >
-                  <span className={`text-xs font-medium ${textColor}`}>
-                    {step.label}
-                  </span>
-                  <span className="text-[10px] text-slate-500 ml-2 whitespace-nowrap">
-                    {step.duration_ms.toFixed(0)}ms
-                  </span>
-                </div>
+                {/* Expanded Details */}
+                {isStepExpanded && step.details && (
+                  <div className="ml-7 mr-2 p-2 rounded bg-black/20 border border-white/5 text-[10px] font-mono text-slate-400 overflow-x-auto">
+                    <pre>{JSON.stringify(step.details, null, 2)}</pre>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -11,6 +11,7 @@ from src.features.documents.infrastructure.pdf_processor import PDFProcessor
 from src.features.documents.infrastructure.word_processor import WordProcessor
 from src.features.rag.domain.chunking import ChunkingStrategy
 from src.features.rag.domain.interfaces import IEmbeddingService, IVectorStore
+from src.features.documents.application.redaction_service import RedactionService
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,8 @@ class DocumentService:
         chunking_strategy: ChunkingStrategy,
         embedding_service: IEmbeddingService,
         vector_store: IVectorStore,
-        storage_path: str
+        storage_path: str,
+        redaction_service: Optional[RedactionService] = None
     ):
         """
         Initialize document service with dependencies.
@@ -42,6 +44,7 @@ class DocumentService:
             embedding_service: Embedding generation service
             vector_store: Vector database
             storage_path: Path to store uploaded documents
+            redaction_service: Optional PII redaction service
         """
         self.processors = {
             DocumentType.PDF: pdf_processor,
@@ -51,15 +54,30 @@ class DocumentService:
         self.embeddings = embedding_service
         self.vector_store = vector_store
         self.storage_path = Path(storage_path)
+        self.redaction_service = redaction_service
 
         # Ensure storage directory exists
         self.storage_path.mkdir(parents=True, exist_ok=True)
+
+    def calculate_hash(self, file_path: str) -> str:
+        """
+        Calculate SHA-256 hash of a file.
+        """
+        import hashlib
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            # Read and update hash string value in blocks of 4K
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
 
     async def process_document(
         self,
         file_path: str,
         document_type: DocumentType,
-        original_filename: Optional[str] = None
+        original_filename: Optional[str] = None,
+        tenant_id: str = "default",
+        content_hash: Optional[str] = None
     ) -> Document:
         """
         Main pipeline: Extract → Chunk → Embed → Store.
@@ -84,6 +102,8 @@ class DocumentService:
         # Create document entity
         document = Document(
             id=doc_id,
+            tenant_id=tenant_id,
+            content_hash=content_hash,
             filename=filename,
             file_path=file_path,
             document_type=document_type,
@@ -106,6 +126,13 @@ class DocumentService:
 
             logger.info(f"Extracted {len(text)} characters from {filename}")
 
+            # Step 1.5: PII Redaction
+            if self.redaction_service:
+                text, redacted_types = self.redaction_service.redact_text(text)
+                if redacted_types:
+                    metadata["pii_redacted"] = redacted_types
+                    logger.info(f"Redacted PII types: {redacted_types}")
+
             # Step 2: Chunk text
             chunks = self.chunking.chunk_text(
                 text=text,
@@ -113,11 +140,15 @@ class DocumentService:
                 metadata={**metadata, "filename": filename}
             )
 
+            # Step 2.5: Assign tenant to chunks
+            for chunk in chunks:
+                chunk.tenant_id = tenant_id
+
             logger.info(f"Created {len(chunks)} chunks from {filename}")
 
             # Step 3: Generate embeddings
             chunk_texts = [chunk.text for chunk in chunks]
-            embeddings = await self.embeddings.generate_embeddings_batch(chunk_texts)
+            embeddings = await self.embeddings.generate_embeddings_large_batch(chunk_texts)
 
             # Attach embeddings to chunks
             for chunk, embedding in zip(chunks, embeddings):
@@ -146,18 +177,19 @@ class DocumentService:
             document.error_message = str(e)
             raise RuntimeError(f"Document processing failed: {e}")
 
-    async def delete_document(self, document_id: str) -> None:
+    async def delete_document(self, document_id: str, tenant_id: str = "default") -> None:
         """
         Delete document and all its chunks.
 
         Args:
             document_id: Document ID to delete
+            tenant_id: Tenant context
         """
         logger.info(f"Deleting document: {document_id}")
 
         try:
             # Delete from vector store
-            await self.vector_store.delete_document(document_id)
+            await self.vector_store.delete_document(document_id, tenant_id=tenant_id)
 
             logger.info(f"Successfully deleted document: {document_id}")
 

@@ -1,6 +1,6 @@
 # Web Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
 python-multipart==0.0.6
 
 # AI/ML
@@ -29,3 +29,7 @@ python-dotenv==1.0.0
 tantivy==0.21.1
 sentence-transformers==2.3.1
 torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu
+
+# Evaluation
+ragas==0.2.14
+datasets==2.16.1

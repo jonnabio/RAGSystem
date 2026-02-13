@@ -1,0 +1,39 @@
+{
+  "dataset": [
+    {
+      "question": "What is the primary role of the Architect?",
+      "ground_truth": "The primary role of the Architect is to analyze requirements, conduct the Discuss Phase, create implementation plans, define design decisions, and identify risks before implementation begins.",
+      "context": [
+        "The primary role of the Architect is focused on system design, planning, and architectural decisions. Responsibilities include analyzing requirements against docs/context/, conducting the Discuss Phase, and creating implementation plans."
+      ]
+    },
+    {
+      "question": "What are the core responsibilities of the Developer?",
+      "ground_truth": "A Developer is responsible for writing code follows the Architect's plan, updating the task checklist, adhering to coding and security standards, committing code atomically, and checking regression guards before modifications.",
+      "context": [
+        "Responsibilities of the Developer include writing code that strictly follows the Architect's plan, updating the task checklist, and adhering to system patterns and standards. They must commit immediately after each atomic task and check regression guards."
+      ]
+    },
+    {
+      "question": "What is the trigger for the QA Engineer role?",
+      "ground_truth": "The QA Engineer role is triggered when the system Mode is set to VERIFICATION.",
+      "context": [
+        "The QA Engineer is triggered when Mode is VERIFICATION. They are responsible for executing verification plans, running smoke/integration tests, and creating walkthrough artifacts."
+      ]
+    },
+    {
+      "question": "When is the Incident Responder activated?",
+      "ground_truth": "The Incident Responder is activated when an issue is discovered in testing or production, switching the system to INCIDENT mode.",
+      "context": [
+        "The Incident Responder is triggered when Mode is INCIDENT, usually after an issue is discovered. They apply immediate fixes, perform root cause analysis (RCA), and implement permanent solutions with regression guards."
+      ]
+    },
+    {
+      "question": "What is the RAG Triad measured by Ragas?",
+      "ground_truth": "The RAG Triad measured by Ragas includes Context Precision, Faithfulness, and Answer Relevance.",
+      "context": [
+        "We will integrate Ragas (Retrieval Augmented Generation Assessment) to measure the 'RAG Triad': Context Precision, Faithfulness, and Answer Relevance."
+      ]
+    }
+  ]
+}

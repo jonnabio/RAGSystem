@@ -26,6 +26,7 @@ class Document(BaseModel):
     """Document entity representing an uploaded file."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    tenant_id: str = "default"
     filename: str
     file_path: str
     document_type: DocumentType
@@ -34,6 +35,7 @@ class Document(BaseModel):
     processed: bool = False
     status: DocumentStatus = DocumentStatus.UPLOADED
     chunk_count: int = 0
+    content_hash: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     error_message: Optional[str] = None
 
@@ -57,6 +59,7 @@ class Chunk(BaseModel):
     """Text chunk entity with optional embedding."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    tenant_id: str = "default"
     document_id: str
     chunk_index: int
     text: str
