@@ -1,6 +1,6 @@
 """Chat service - RAG query and response generation."""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import logging
 from datetime import datetime
 
@@ -14,8 +14,10 @@ from src.features.rag.domain.interfaces import (
 )
 from src.features.rag.application.query_decomposition_service import QueryDecompositionService
 from src.features.rag.application.router_service import QueryRouter
-from src.features.rag.application.reranking_service import RerankingService
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from src.features.rag.application.reranking_service import RerankingService
 
 logger = logging.getLogger(__name__)
 

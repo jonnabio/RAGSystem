@@ -15,7 +15,7 @@ A full-featured Retrieval-Augmented Generation (RAG) chatbot system with multi-m
 
 - Python 3.11+
 - Node.js 20+
-- OpenRouter API key (get from https://openrouter.ai/)
+- OpenRouter API key (get from <https://openrouter.ai/>)
 - (Optional) OpenAI API key for embeddings
 
 ## 🛠️ Setup
@@ -57,6 +57,16 @@ cp .env.example .env.local
 
 ## 🏃 Running the Application
 
+### Quick Start (Windows)
+
+The easiest way to run the entire system (Backend + Frontend) is using the provided batch script:
+
+```bash
+.\run_dev.bat
+```
+
+This will launch both services in separate windows.
+
 ### Start Backend
 
 ```bash
@@ -68,8 +78,8 @@ source venv/bin/activate  # macOS/Linux
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Backend will be available at: http://localhost:8000
-API docs (Swagger): http://localhost:8000/docs
+Backend will be available at: <http://localhost:8000>
+API docs (Swagger): <http://localhost:8000/docs>
 
 ### Start Frontend
 
@@ -78,7 +88,7 @@ cd frontend
 npm run dev
 ```
 
-Frontend will be available at: http://localhost:3000
+Frontend will be available at: <http://localhost:3000>
 
 ## 🧪 Running Tests
 
@@ -100,7 +110,7 @@ npm run test
 
 ## 📁 Project Structure
 
-```
+```text
 RAGSystem/
 ├── backend/
 │   ├── src/
@@ -145,14 +155,14 @@ See `docs/adr/` for detailed architectural decisions.
 
 Once the backend is running, visit:
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: <http://localhost:8000/docs>
+- ReDoc: <http://localhost:8000/redoc>
 
 ## 🔑 Environment Variables
 
 ### Backend (.env)
 
-```
+```env
 # API Configuration
 API_HOST=0.0.0.0
 API_PORT=8000
@@ -174,7 +184,7 @@ CHUNK_OVERLAP=50
 
 ### Frontend (.env.local)
 
-```
+```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 

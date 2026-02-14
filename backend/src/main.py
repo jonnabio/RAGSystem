@@ -237,7 +237,7 @@ async def upload_document(
         pipeline_tracker.complete_step(run_id, step_id, {"type": str(doc_type), "extension": extension})
 
         # Step 2: Save file
-        step_id = pipeline_tracker.add_step(run_id, "saving", f"Saving file to storage")
+        step_id = pipeline_tracker.add_step(run_id, "saving", "Saving file to storage")
         file_id = str(uuid.uuid4())
         file_path = Path(settings.DOCUMENT_STORAGE_PATH) / f"{file_id}{extension}"
 

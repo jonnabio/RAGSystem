@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from src.features.rag.domain.interfaces import ILLMClient
+from src.features.rag.domain.interfaces import ILLMClient, Message
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -33,14 +33,22 @@ class QueryRouter:
         prompt = self._build_router_prompt(query)
 
         try:
-            # We use a structured prompt to get a JSON-like response
-            response = await self.llm_client.generate_response(
-                prompt=prompt,
-                system_prompt="You are a query router for a RAG system. Your job is to classify the user query into one of the specialized indices."
+            # use default model for routing
+            model = settings.DEFAULT_MODEL
+
+            # Create messages
+            messages = [
+                Message(role="system", content="You are a query router for a RAG system. Your job is to classify the user query into one of the specialized indices."),
+                Message(role="user", content=prompt)
+            ]
+
+            response = await self.llm_client.generate(
+                messages=messages,
+                model=model
             )
 
             # Simple parsing (could be improved with instructor or JSON mode)
-            selection = self._parse_llm_response(response.answer)
+            selection = self._parse_llm_response(response.content)
             logger.info(f"Query routed to '{selection.index_name}' (conf: {selection.confidence})")
             return selection
 

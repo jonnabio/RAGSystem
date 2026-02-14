@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import ConversationHistory from "../components/chat/ConversationHistory";
 import FeedbackButtons from "../components/chat/FeedbackButtons";
 import InteractiveCitations from "../components/chat/InteractiveCitations";
+import PipelineStatus from "../components/chat/PipelineStatus";
 import ThoughtProcess from "../components/chat/ThoughtProcess";
 import SystemTransparency from "../components/SystemTransparency";
 import { trackQuery } from "../lib/analytics";
@@ -27,6 +28,7 @@ interface Message {
     model: string;
     tokens: number;
     cost?: number;
+    total_latency_ms?: number;
   };
 }
 
@@ -213,6 +215,11 @@ export default function ChatPage() {
             model: data.model,
             tokens: data.tokens_used,
             cost: data.cost,
+            total_latency_ms:
+              data.pipeline_steps?.reduce(
+                (acc: number, step: PipelineStep) => acc + step.duration_ms,
+                0,
+              ) || 0,
           },
         };
 
@@ -423,10 +430,22 @@ export default function ChatPage() {
                       <InteractiveCitations sources={message.sources} />
                     )}
 
-                    {/* Thought Process */}
+                    {/* Pipeline Status (New Visual) */}
                     {message.pipeline_steps &&
                       message.pipeline_steps.length > 0 && (
-                        <ThoughtProcess steps={message.pipeline_steps} />
+                        <div className="mt-4 pt-3 border-t border-white/5">
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3">
+                            AI Reasoning Path
+                          </p>
+                          <PipelineStatus
+                            steps={message.pipeline_steps}
+                            totalTime={message.metadata?.total_latency_ms || 0}
+                          />
+                          {/* Still keep the detailed view if they want to dig deeper */}
+                          <div className="mt-2">
+                            <ThoughtProcess steps={message.pipeline_steps} />
+                          </div>
+                        </div>
                       )}
 
                     {/* Metadata + Feedback */}

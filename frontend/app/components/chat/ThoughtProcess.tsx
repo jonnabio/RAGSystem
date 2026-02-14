@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ThoughtProcessDetails from "./thought-process/ThoughtProcessDetails";
 
 interface PipelineStep {
   step: string;
@@ -115,8 +116,8 @@ export default function ThoughtProcess({ steps }: ThoughtProcessProps) {
 
                 {/* Expanded Details */}
                 {isStepExpanded && step.details && (
-                  <div className="ml-7 mr-2 p-2 rounded bg-black/20 border border-white/5 text-[10px] font-mono text-slate-400 overflow-x-auto">
-                    <pre>{JSON.stringify(step.details, null, 2)}</pre>
+                  <div className="ml-7 mr-2 mt-2 animate-fadeIn">
+                    <ThoughtProcessDetails step={step} />
                   </div>
                 )}
               </div>

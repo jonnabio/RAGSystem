@@ -139,28 +139,62 @@ export default function InteractiveCitations({
               {/* Expanded content */}
               {isExpanded && (
                 <div className="px-3 pb-3 pt-1 border-t border-white/5 animate-fadeIn">
-                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
-                    {source.text}
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-serif">
+                    &quot;{source.text}&quot;
                   </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                    <span>Score: {source.score.toFixed(4)}</span>
-                    {source.document_id && (
-                      <span>Doc: {source.document_id.substring(0, 8)}...</span>
-                    )}
-                    {/* Retrieval Methods */}
-                    {(source.metadata?.retrieval_methods as string[])?.map(
-                      (method) => {
-                        const badge = getRetrievalBadge(method);
-                        return (
-                          <span
-                            key={method}
-                            className={`px-1.5 py-0.5 rounded border ${badge.className}`}
-                          >
-                            {badge.label}
+
+                  {/* Glass Box Analysis */}
+                  <div className="mt-3 bg-black/40 p-2.5 rounded border border-white/5">
+                    <p className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider flex items-center gap-1">
+                      <span>🔍</span> Glass Box Analysis
+                    </p>
+                    <div className="flex flex-wrap gap-4 text-[10px]">
+                      <div>
+                        <span className="text-slate-500 block">
+                          Relevance Score
+                        </span>
+                        <span
+                          className={`font-mono font-medium ${badge.className.split(" ")[1]}`}
+                        >
+                          {source.score.toFixed(4)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">
+                          Retrieval Method(s)
+                        </span>
+                        <div className="flex gap-1.5 mt-0.5">
+                          {(
+                            source.metadata?.retrieval_methods as string[]
+                          )?.map((method) => {
+                            const rBadge = getRetrievalBadge(method);
+                            return (
+                              <span
+                                key={method}
+                                className={`px-1.5 py-0.5 rounded border ${rBadge.className} flex items-center gap-1`}
+                                title={`This chunk was found using ${method} search`}
+                              >
+                                {method === "vector" && "🧬"}
+                                {method === "keyword" && "🔑"}
+                                {method === "multi-hop" && "🔀"}
+                                {rBadge.label}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {source.document_id && (
+                        <div>
+                          <span className="text-slate-500 block">
+                            Source Document
                           </span>
-                        );
-                      },
-                    )}
+                          <span className="text-slate-300 font-mono">
+                            {(source.metadata?.filename as string) ||
+                              source.document_id.substring(0, 8)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
