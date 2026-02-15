@@ -50,6 +50,7 @@ class ChatResponse(BaseModel):
     retrieval_time_ms: float
     generation_time_ms: float
     pipeline_steps: List[PipelineStep] = []
+    debug_info: Optional[Dict[str, Any]] = None
 
 
 class ChatService:
@@ -307,7 +308,13 @@ class ChatService:
             cost=llm_response.cost,
             retrieval_time_ms=retrieval_time,
             generation_time_ms=generation_time,
-            pipeline_steps=pipeline_steps
+            pipeline_steps=pipeline_steps,
+            debug_info={
+                "final_prompt": [m.model_dump() for m in messages],
+                "system_prompt": messages[0].content if messages else "",
+                "user_query": request.query,
+                "context_used": context
+            }
         )
 
         logger.info(
@@ -316,7 +323,6 @@ class ChatService:
             f"retrieval: {retrieval_time:.0f}ms, "
             f"generation: {generation_time:.0f}ms"
         )
-
         return response
 
     def _assemble_context(self, search_results: List[SearchResult]) -> str:

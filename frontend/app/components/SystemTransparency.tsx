@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import PromptInspector from "./chat/PromptInspector";
 
 interface SystemInfo {
   chunking: {
@@ -62,7 +63,18 @@ interface EvaluationResults {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
-export default function SystemTransparency() {
+interface SystemTransparencyProps {
+  latestDebugInfo?: {
+    final_prompt?: { role: string; content: string }[];
+    system_prompt?: string;
+    user_query?: string;
+    context_used?: string;
+  };
+}
+
+export default function SystemTransparency({
+  latestDebugInfo,
+}: SystemTransparencyProps) {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
@@ -151,6 +163,22 @@ export default function SystemTransparency() {
 
   return (
     <div className="space-y-6 text-sm">
+      {/* ── Live Prompt Inspector ── */}
+      <section>
+        <SectionTitle>Live Prompt Inspector</SectionTitle>
+        <div className="bg-white/5 rounded-xl p-0 overflow-hidden">
+          {latestDebugInfo ? (
+            <PromptInspector debugInfo={latestDebugInfo} />
+          ) : (
+            <div className="p-4 text-slate-500 text-xs italic text-center">
+              Waiting for a chat response...
+              <br />
+              Send a message to inspect its prompt.
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* ── RAG Pipeline Architecture ── */}
       <section>
         <SectionTitle>RAG Pipeline Architecture</SectionTitle>

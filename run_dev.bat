@@ -8,5 +8,5 @@ echo Starting Frontend...
 start "RAG Frontend" cmd /k "cd frontend && npm run dev"
 
 echo Services allow a few seconds to initialize.
-echo Backend: http://localhost:8001/docs
+echo Backend: http://localhost:8002/docs
 echo Frontend: http://localhost:3000

@@ -30,6 +30,12 @@ interface Message {
     cost?: number;
     total_latency_ms?: number;
   };
+  debug_info?: {
+    final_prompt?: { role: string; content: string }[];
+    system_prompt?: string;
+    user_query?: string;
+    context_used?: string;
+  };
 }
 
 interface Source {
@@ -221,6 +227,7 @@ export default function ChatPage() {
                 0,
               ) || 0,
           },
+          debug_info: data.debug_info,
         };
 
         // Track analytics
@@ -449,6 +456,7 @@ export default function ChatPage() {
                       )}
 
                     {/* Metadata + Feedback */}
+                    {/* Metadata + Feedback */}
                     {message.metadata && (
                       <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center gap-3 text-xs">
                         {getConfidenceBadge(message.confidence)}
@@ -533,7 +541,14 @@ export default function ChatPage() {
               ✕
             </button>
           </div>
-          <SystemTransparency />
+          <SystemTransparency
+            latestDebugInfo={
+              messages
+                .slice()
+                .reverse()
+                .find((m) => m.debug_info)?.debug_info
+            }
+          />
         </div>
       )}
     </div>
