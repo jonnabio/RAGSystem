@@ -110,14 +110,14 @@
   - [x] Test: End-to-end pipeline
   - [x] Verify: Chunks in LanceDB
 
-- [ ] **Task 4.2**: Chat Service ⏱️ 5h
-  - [ ] Implement query embedding
-  - [ ] Implement retrieval logic
-  - [ ] Assemble context for LLM
-  - [ ] Generate response
-  - [ ] Calculate confidence scores
-  - [ ] Test: RAG pipeline works
-  - [ ] Verify: Sources returned
+- [x] **Task 4.2**: Chat Service ⏱️ 5h
+  - [x] Implement query embedding
+  - [x] Implement retrieval logic
+  - [x] Assemble context for LLM
+  - [x] Generate response
+  - [x] Calculate confidence scores
+  - [x] Test: RAG pipeline works
+  - [x] Verify: Sources returned
 
 ---
 
@@ -134,10 +134,10 @@
   - [ ] Test: File upload works
   - [ ] Verify: Error handling
 
-- [ ] **Task 5.2**: Chat API ⏱️ 3h
-  - [ ] Create chat endpoint
-  - [ ] Validate request models
-  - [ ] Integrate with ChatService
+- [x] **Task 5.2**: Chat API ⏱️ 3h
+  - [x] Create chat endpoint
+  - [x] Validate request models
+  - [x] Integrate with ChatService
   - [ ] Create models endpoint
   - [ ] Test: Chat API works
   - [ ] Verify: Model selection works
@@ -168,14 +168,14 @@
   - [x] Test: Upload works
   - [ ] Verify: Error messages shown (Improving error handling)
 
-- [ ] **Task 6.3**: Chat Interface ⏱️ 6h
-  - [ ] Create message list component
-  - [ ] Create input box
-  - [ ] Create model selector dropdown
-  - [ ] Display sources and confidence
-  - [ ] Handle loading states
-  - [ ] Test: Chat flow works
-  - [ ] Verify: Model switching works
+- [/] **Task 6.3**: Chat Interface ⏱️ 6h
+  - [x] Create message list component
+  - [x] Create input box
+  - [x] Create model selector dropdown
+  - [x] Display sources and confidence
+  - [x] Handle loading states
+  - [x] Test: Chat flow works
+  - [x] Verify: Model switching works
 
 - [ ] **Task 6.4**: Analytics Dashboard ⏱️ 4h
   - [ ] Create analytics cards

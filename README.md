@@ -216,7 +216,25 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 - **Test Files**:
   - `test_document_entities.py`: Document and Chunk entities
   - `test_chunking.py`: Chunking strategy
+  - `test_tenancy_enforcement.py`: Multi-tenancy isolation and propagation
   - More test files in development
+
+### Manual Verification (Tenancy)
+
+1. **Configure Tenant A**:
+   - Go to Settings > Organization > Tenant ID.
+   - Set to `tenant-a`.
+   - Upload `document_a.pdf`.
+2. **Configure Tenant B**:
+   - Go to Settings > Organization > Tenant ID.
+   - Set to `tenant-b`.
+   - Verify document list is empty (or does not contain `document_a.pdf`).
+   - Upload `document_b.pdf`.
+3. **Verify Chat Isolation**:
+   - As `tenant-b`, ask a question about `document_a.pdf`.
+   - Result should be a "I cannot find..." response.
+   - Switch back to `tenant-a` and ask the same question.
+   - Result should include the answer with citations.
 
 ## 🔒 Security
 

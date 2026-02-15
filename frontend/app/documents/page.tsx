@@ -24,12 +24,23 @@ export default function DocumentsPage() {
   const [dragActive, setDragActive] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [tenantId, setTenantId] = useState("default");
 
-  const fetchDocuments = async () => {
+  useEffect(() => {
+    setCurrentTime(Date.now());
+    // Load tenant ID from settings
+    const settings = localStorage.getItem("rag_system_app_settings");
+    if (settings) {
+      const parsed = JSON.parse(settings);
+      setTenantId(parsed.tenantId || "default");
+    }
+  }, []);
+
+  const fetchDocuments = useCallback(async () => {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/documents`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/documents?tenant_id=${tenantId}`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -38,71 +49,75 @@ export default function DocumentsPage() {
     } catch (error) {
       console.error("Error fetching documents:", error);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchDocuments();
-  }, []);
+  }, [fetchDocuments]);
 
+  // Update current time on documents change/tab change to refresh relative times
   useEffect(() => {
     setCurrentTime(Date.now());
   }, [documents, activeTab]);
 
-  const uploadFile = async (file: File) => {
-    setIsUploading(true);
-    setUploadProgress(0);
+  const uploadFile = useCallback(
+    async (file: File) => {
+      setIsUploading(true);
+      setUploadProgress(0);
 
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 90) return prev;
-        return prev + 10;
-      });
-    }, 500);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/documents/upload`,
-        {
-          method: "POST",
-          body: formData,
-        },
-      );
-
-      clearInterval(interval);
-
-      if (response.ok) {
-        setUploadProgress(100);
-
-        // Track as activity
-        trackActivity({
-          type: "upload",
-          title: `Uploaded: "${file.name}"`,
-          description: `${(file.size / 1024).toFixed(1)} KB`,
-          timestamp: new Date(),
+      const interval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 90) return prev;
+          return prev + 10;
         });
+      }, 500);
 
-        await fetchDocuments();
-        setTimeout(() => {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/documents/upload?tenant_id=${tenantId}`,
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+
+        clearInterval(interval);
+
+        if (response.ok) {
+          setUploadProgress(100);
+
+          // Track as activity
+          trackActivity({
+            type: "upload",
+            title: `Uploaded: "${file.name}"`,
+            description: `${(file.size / 1024).toFixed(1)} KB`,
+            timestamp: new Date(),
+          });
+
+          await fetchDocuments();
+          setTimeout(() => {
+            setIsUploading(false);
+            setUploadProgress(0);
+          }, 500);
+        } else {
+          const errorText = await response.text();
+          alert(`Upload failed: ${errorText}`);
           setIsUploading(false);
           setUploadProgress(0);
-        }, 500);
-      } else {
-        const errorText = await response.text();
-        alert(`Upload failed: ${errorText}`);
+        }
+      } catch (error) {
+        clearInterval(interval);
+        console.error("Upload error:", error);
+        alert("Upload failed. Make sure the backend is running.");
         setIsUploading(false);
         setUploadProgress(0);
       }
-    } catch (error) {
-      clearInterval(interval);
-      console.error("Upload error:", error);
-      alert("Upload failed. Make sure the backend is running.");
-      setIsUploading(false);
-      setUploadProgress(0);
-    }
-  };
+    },
+    [tenantId, fetchDocuments],
+  );
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -114,15 +129,18 @@ export default function DocumentsPage() {
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      uploadFile(e.dataTransfer.files[0]);
-    }
-  }, []);
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        uploadFile(e.dataTransfer.files[0]);
+      }
+    },
+    [uploadFile],
+  );
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -135,7 +153,7 @@ export default function DocumentsPage() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/documents/${id}`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/documents/${id}?tenant_id=${tenantId}`,
         {
           method: "DELETE",
         },

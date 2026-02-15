@@ -209,7 +209,7 @@ async def health_check():
 async def upload_document(
     file: UploadFile = File(...),
     doc_service: DocumentService = Depends(get_document_service),
-    tenant_id: str = "default"  # Assuming tenant_id passed as query param for validatiom or header via Depends
+    tenant_id: str = "default"
 ):
     """
     Upload and process a document.
@@ -325,8 +325,8 @@ async def upload_document(
 
 
 @app.get("/api/documents", response_model=List[Dict])
-async def list_documents():
-    """List all uploaded documents."""
+async def list_documents(tenant_id: str = "default"):
+    """List all uploaded documents for a tenant."""
     return [
         {
             "id": doc.id,
@@ -339,6 +339,7 @@ async def list_documents():
             "metadata": doc.metadata
         }
         for doc in documents_db.values()
+        if doc.tenant_id == tenant_id
     ]
 
 

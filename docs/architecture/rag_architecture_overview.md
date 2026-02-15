@@ -1,133 +1,151 @@
 # RAG System Architecture Overview
 
-This document provides a detailed architectural explanation of the **jonnabio/RAGSystem**, serving as a reference for agents, developers, and stakeholders.
+This document provides a detailed architectural explanation of the **jonnabio/RAGSystem**, serving as a reference for agents, developers, and stakeholders. It is written from the perspective of a Computer Science educator to explain not just _what_ we built, but _why_ we built it that way.
 
 ## 1. System Overview
 
-The **RAG (Retrieval-Augmented Generation) System** is designed to enhance Large Language Model (LLM) responses by retrieving relevant information from a curated knowledge base of uploaded documents (PDFs, DOCX). This "grounding" process reduces hallucinations and ensures answers are based on specific, trusted data.
+The **RAG (Retrieval-Augmented Generation) System** is designed to enhance Large Language Model (LLM) responses by retrieving relevant information from a curated knowledge base. This "grounding" process reduces hallucinations and ensures answers are based on specific, trusted data.
 
 ### Core Philosophy
 
-- **Ingestion**: Convert unstructured documents into searchable vector representations, handling PII redaction and duplicate detection.
-- **Retrieval**: Find the most semantically relevant text chunks for a user query using Hybrid Search (Vector + Keyword) and Multi-Hop reasoning.
-- **Augmentation**: Provide the retrieved chunks to the LLM as context.
-- **Generation**: The LLM synthesizes an answer based _only_ on the provided context.
+1.  **Ingestion**: Convert unstructured documents (PDF, DOCX) into searchable vector representations, handling PII redaction and duplicate detection.
+2.  **Retrieval**: Find the most semantically relevant text chunks using **Hybrid Search** (Vector + Keyword) and **Multi-Hop reasoning**.
+3.  **Augmentation**: Provide the retrieved chunks to the LLM as verified context.
+4.  **Generation**: The LLM synthesizes an answer based _only_ on the provided context.
+5.  **Observability**: Provide "glass box" transparency into the AI's reasoning via the **Prompt Inspector**.
 
 ---
 
 ## 2. Agents (Functional Services)
 
-In this specific implementation, "Agents" refer to the specialized functional services that autonomously handle distinct parts of the pipeline. They are orchestrated by the `pipeline_tracker` in `backend/src/shared/pipeline_events.py`.
+In this implementation, "Agents" are specialized services that autonomously handle distinct parts of the pipeline.
 
 ### A. The Ingestion Agent (`DocumentService`)
 
-- **Code Location**: `backend/src/features/documents/application/document_service.py`
-- **Class**: `DocumentService`
-- **Role**: Librarian & Processor
-- **Responsibility**: Takes raw files, validates them, chunks the text, generates embeddings, and indexes them into the vector database.
-- **New Capabilities**:
-  - **Content Hashing**: Calculates SHA-256 hash of files to prevent duplicate uploads.
-  - **PII Redaction**: Uses `RedactionService` to automatically mask sensitive information (Emails, Phone Numbers, SSN, Credit Cards) before storage.
-  - **Tenancy**: Tags all documents and chunks with a `tenant_id` for data isolation.
+- **Role**: Librarian & Processor.
+- **Responsibility**: Takes raw files, validates them, chunks the text, and indexes them.
+- **Key Features**:
+  - **Content Hashing**: SHA-256 hashing to prevent duplicate uploads.
+  - **PII Redaction**: Automatically masks sensitive info (Emails, SSN) _before_ embedding.
+  - **Tenancy**: Tags all data with `tenant_id` for isolation.
 
 ### B. The Retrieval & Generation Agent (`ChatService`)
 
-- **Code Location**: `backend/src/features/chat/application/chat_service.py`
-- **Class**: `ChatService`
-- **Role**: Researcher & Responder
-- **Responsibility**: Interprets user queries, finds relevant information, and crafts the final response.
-- **Advanced Retrieval Strategies**:
-  - **Hybrid Search**: Combines **Vector Search** (semantic meaning) with **Keyword Search** (BM25 exact match) using Reciprocal Rank Fusion (RRF).
-  - **Multi-Hop Retrieval**: Decomposes complex queries into sub-queries (via `QueryDecompositionService`) to find information scattered across multiple documents.
-  - **Deep Visualization**: Returns detailed metadata (`retrieval_methods`) to the frontend, allowing users to see exactly how each piece of information was found (Vector, Keyword, or Multi-Hop).
+- **Role**: Researcher & Responder.
+- **Responsibility**: Interprets queries, executes retrieval strategies, and crafts responses.
+- **Key Features**:
+  - **Query Decomposition**: Breaks complex questions into sub-queries.
+  - **Hybrid Search**: Combines semantic understanding with exact keyword matching.
+  - **Prompt Inspection**: Exposes the exact prompt sent to the LLM for debugging.
 
 ### C. The External Communication Agent (`OpenRouterClient`)
 
-- **Code Location**: `backend/src/features/rag/infrastructure/openrouter_client.py`
-- **Class**: `OpenRouterClient`
-- **Role**: LLM Gateway
-- **Responsibility**: Manages all communication with external LLM providers (via OpenRouter), handling API keys, headers, and response parsing.
+- **Role**: Gateway.
+- **Responsibility**: Manages communication with LLM providers (Llama 3, GPT-4, etc.) via OpenRouter.
 
 ---
 
-## 3. Data Privacy & Security (New)
+## 3. Advanced Retrieval Patterns (Educational)
 
-The system now enforces strict data privacy and isolation protocols:
+### A. Hybrid Retrieval and Reranking
 
-1.  **Multi-Tenancy**:
-    - Every `Document` and `Chunk` is tagged with a `tenant_id`.
-    - All retrieval and deletion operations in `LanceDBVectorStore` automatically filter by `tenant_id`.
-    - This ensures that users can only access their own data, even within a shared vector database.
+In production RAG systems, relying solely on **Vector Search** (embeddings) often fails for specific queries (e.g., searching for a specific product ID like "XJ-900").
 
-2.  **PII Redaction**:
-    - **Service**: `RedactionService`
-    - **Patterns**: Regex-based detection for:
-      - Emails
-      - Phone Numbers
-      - SSNs
-      - Credit Card Numbers
-    - **Action**: Sensitive text is replaced with `[REDACTED: TYPE]` _before_ embedding generation. This ensures PII never enters the vector space or the LLM context.
+- **Vector Search**: Excellent for _concepts_ ("devices for cleaning").
+- **Keyword Search (BM25)**: Excellent for _exact matches_ ("XJ-900").
 
----
+**Our Approach**: We run both searches in parallel and combine them using **Reciprocal Rank Fusion (RRF)**. RRF allows us to merge two different ranked lists without needing to normalize their scores arbitrarily.
 
-## 4. The Retrieval Process (Enhanced)
+- _Theory_: `score = 1 / (k + rank)`. This boosts items that appear near the top of _both_ lists.
 
-The retrieval process is the heart of the RAG system. It follows a strict pipeline:
+### B. Multi-Index and Routing
 
-### Step 1: Query Decomposition (Multi-Hop)
+Not all data should live in one big index. We separate concerns:
 
-- **Input**: User Query.
-- **Process**: The `QueryDecompositionService` analyzes if the query is complex (e.g., comparing two documents).
-- **Output**: If complex, it breaks it down into sub-queries (e.g., "Summarize Doc A" and "Summarize Doc B"). If simple, it keeps it as one.
+- **Technical Docs Index**: For manuals and guides.
+- **Ticket Index**: For support history (future).
+- **Metric Index**: For structured data (future).
 
-### Step 2: Hybrid Search (Parallel)
+**Implementation**: Our `QueryRouter` ("Step 2") analyzes the user's intent to decide _which_ index to query.
 
-- For each sub-query, the system executes two searches in parallel:
-  1.  **Vector Search**: Using OpenAI Embeddings (`text-embedding-3-large`) and Cosine Similarity.
-  2.  **Keyword Search**: Using LanceDB's Full-Text Search (FTS).
-- **Fusion**: Results are combined using **Reciprocal Rank Fusion (RRF)**, boosting documents found by both methods.
+- _Example_: "How do I reset the router?" → Routes to `technical_docs`.
+- _Example_: "How many tickets did we close today?" → Routes to `metrics`.
 
-### Step 3: Result Merging & Visualization
+### C. Multi-Hop Reasoning
 
-- Results from all sub-queries are merged.
-- **Metadata Tagging**: Each result is tagged with how it was found (`vector`, `keyword`, `multi-hop`).
-- **Frontend**: Displays badges (e.g., `[Vector]`, `[Multi-Hop]`) to give users "Glass Box" visibility into the AI's reasoning.
+Standard RAG fails at "comparison" questions like "Does the XJ-900 have a better battery than the Y-200?". The answer lives in two different documents.
+**Implementation**: Our `QueryDecompositionService` detects these complex intents and splits the query:
+
+1.  "What is the battery life of XJ-900?"
+2.  "What is the battery life of Y-200?"
+    We execute both searches, finding chunks for _both_ devices, and then synthesize the final answer.
 
 ---
 
-## 5. Vectors: A Deep Dive
+## 4. Quality and Evaluation
 
-### What is a Vector?
+How do we know if our RAG system is actually good? We use the **Ragas** framework methodology to measure four key metrics:
 
-In the context of AI and RAG, a **Vector** (or Embedding) is a long list of numbers that represents the _semantic meaning_ of a piece of text.
+1.  **Faithfulness**: Does the answer come _only_ from the retrieved context? (Prevents hallucinations).
+2.  **Answer Relevancy**: Does the answer actually address the user's question?
+3.  **Context Precision**: Did we retrieve relevant chunks, or just noise?
+4.  **Context Recall**: Did we retrieve _all_ the necessary information?
 
-- **Analogy**: Imagine a library where every book has a coordinate location (X, Y, Z).
-  - Books about "Cooking" are at coordinate (10, 5, 2).
-  - Books about "Recipes" are at (10, 6, 2) -> _Very close!_
-  - Books about "Quantum Physics" are at (90, 80, 50) -> _Far away._
-
-### High-Dimensional Space
-
-- Our system uses `text-embedding-3-large`, which generates vectors with **3,072 dimensions**.
-- Instead of just X, Y, Z (3 dimensions), it uses 3,072 different axes to capture nuances like:
-  - Topic (Sports vs. Finance)
-  - Sentiment (Happy vs. Sad)
-  - Tense (Past vs. Future)
-  - Entity types (Person vs. Location)
-
-### Why Use Vectors?
-
-Computers cannot understand "meaning" in text directly. They understand numbers. By converting text to vectors, we can mathematically calculate "relatedness." Keyword search looks for exact word matches; Vector search looks for **meaning matches**.
+**Current Status**: We have implemented the `EvaluationService` backend (latent) and an architecture to run these benchmarks on demand.
 
 ---
 
-## 6. Relevant Terminology
+## 5. Production Concerns
 
-| Term              | Definition                                                                                                                                               |
-| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chunking**      | Splitting a large document into smaller, manageable text blocks. Essential because LLMs have a limit on how much text they can process (Context Window). |
-| **Hybrid Search** | Combining Vector Search (semantic) and Keyword Search (exact match) to get the "best of both worlds".                                                    |
-| **Multi-Hop**     | The ability to answer questions that require pieces of information from multiple different documents or sections.                                        |
-| **Tenancy**       | Isolating data so that User A cannot see User B's documents.                                                                                             |
-| **Redaction**     | Masking sensitive information (PII) to protect user privacy.                                                                                             |
-| **Vector Store**  | A specialized database (LanceDB) designed to store and efficiently search through millions of high-dimensional vectors.                                  |
+Moving from prototype to production requires handling "Day 2" operations:
+
+### A. Index Refresh and Invalidation
+
+When a document is updated, its old chunks become "stale" (outdated).
+
+- **Strategy**: Our system currently uses a "Replace" strategy. When a document is re-uploaded (same filename), we delete _all_ old chunks associated with that `document_id` before indexing the new ones. This ensures no "ghost" information remains.
+
+### B. Access Control and Tenancy
+
+In a multi-user system, User A must never see User B's documents.
+
+- **Implementation**: Every chunk in LanceDB has a `tenant_id` column.
+- **Gap Identification**: While our storage layer supports this, our current `ChatService` does not yet strictly enforce passing the `tenant_id` filter during search. This is a known improvement area for the next sprint.
+
+### C. Redaction
+
+We treat privacy as a first-class citizen. PII is redacted _before_ it ever reaches the embedding model or vector inputs. This "Shift Left" privacy approach ensures that even if the database leaks, personal data is not there.
+
+---
+
+## 6. Observability: The Architect's View
+
+We have introduced a dedicated **Architect's View** in the frontend to provide deep visibility into the system's inner workings.
+
+### A. Pipeline Log
+
+Shows the exact execution path of every request:
+
+- "Routing → Technical Docs (98% confidence)"
+- "Retrieval → Found 5 chunks (3 Vector, 2 Keyword)"
+- "Generation → Llama 3 (1.2s)"
+
+### B. Prompt Inspector
+
+A critical debugging tool that reveals:
+
+- **System Prompt**: The exact instructions given to the persona.
+- **Injected Context**: The raw text chunks retrieved from the database.
+- **Full Conversation**: The complete message history sent to the API.
+
+---
+
+## 7. Relevant Terminology
+
+| Term             | Definition                                                                             |
+| :--------------- | :------------------------------------------------------------------------------------- |
+| **Chunking**     | Splitting large documents into smaller overlapping segments (default 512 tokens).      |
+| **Embedding**    | A list of numbers (vector) representing the semantic meaning of text.                  |
+| **RRF**          | Reciprocal Rank Fusion - a method to combine results from different search algorithms. |
+| **Tenancy**      | Isolating data so users only see what belongs to them.                                 |
+| **Vector Store** | A specialized database (LanceDB) for fast similarity search.                           |

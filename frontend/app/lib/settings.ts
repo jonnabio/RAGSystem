@@ -16,6 +16,7 @@ export interface AppSettings {
 
   // UI Settings
   refreshInterval: number; // in milliseconds
+  tenantId: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   retrievalK: 4,
   similarityThreshold: 0.7,
   refreshInterval: 5000,
+  tenantId: "default",
 };
 
 const SETTINGS_KEY = "rag_system_app_settings";

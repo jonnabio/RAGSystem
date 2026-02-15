@@ -141,6 +141,39 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Organization Settings */}
+        <div className="bg-secondary border border-white/5 rounded-xl overflow-hidden">
+          <div className="p-6 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">
+            <div className="w-5 h-5 bg-purple-500/20 rounded flex items-center justify-center">
+              <span className="text-purple-400 text-xs font-bold">ID</span>
+            </div>
+            <h2 className="text-lg font-semibold text-white">Organization</h2>
+          </div>
+          <div className="p-6">
+            <label
+              htmlFor="tenant-id"
+              className="block text-sm font-medium text-slate-300 mb-2"
+            >
+              Tenant ID
+            </label>
+            <input
+              id="tenant-id"
+              type="text"
+              value={settings.tenantId}
+              onChange={(e) =>
+                setSettings({ ...settings, tenantId: e.target.value })
+              }
+              placeholder="e.g. organization-a"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white
+                       focus:border-purple-500/50 outline-none transition-colors"
+            />
+            <p className="mt-2 text-xs text-slate-500 italic">
+              Data is isolated by Tenant ID. Changing this will switch to a
+              different workspace.
+            </p>
+          </div>
+        </div>
+
         {/* Model Preferences */}
         <div className="bg-secondary border border-white/5 rounded-xl overflow-hidden">
           <div className="p-6 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">

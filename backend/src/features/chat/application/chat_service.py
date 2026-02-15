@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     conversation_history: List[Message] = []
     max_context_chunks: int = 5
     temperature: float = 0.7
+    tenant_id: str = "default"
 
 
 class PipelineStep(BaseModel):
@@ -170,7 +171,8 @@ class ChatService:
                     query=sq,
                     query_embedding=embeddings_map[sq],
                     table_name=target_index,
-                    limit=initial_k
+                    limit=initial_k,
+                    tenant_id=request.tenant_id
                 )
             )
 
@@ -453,7 +455,8 @@ class ChatService:
         query: str,
         query_embedding: List[float],
         table_name: str,
-        limit: int
+        limit: int,
+        tenant_id: str = "default"
     ) -> tuple[List[SearchResult], Dict[str, Any]]:
         """Execute parallel vector and keyword search and fuse results."""
         import asyncio
@@ -462,13 +465,15 @@ class ChatService:
         vector_task = self.vector_store.search(
             query_embedding=query_embedding,
             limit=limit,
-            table_name=table_name
+            table_name=table_name,
+            tenant_id=tenant_id
         )
 
         keyword_task = self.vector_store.search_keyword(
             query=query,
             limit=limit,
-            table_name=table_name
+            table_name=table_name,
+            tenant_id=tenant_id
         )
 
         vector_results, keyword_results = await asyncio.gather(vector_task, keyword_task)

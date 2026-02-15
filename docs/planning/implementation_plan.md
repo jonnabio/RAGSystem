@@ -54,10 +54,10 @@ Upgrade the RAG system to detailed industry standards by implementing Hybrid Ret
 
 ### Tasks
 
-- [ ] **Tenancy**:
-  - [ ] Update `Document` and `Chunk` entities to include `tenant_id`.
-  - [ ] Update `LanceDBVectorStore` to enforce `tenant_id` filter on every query.
-  - [ ] Update `DocumentService` to require `tenant_id` on ingestion.
+- [x] **Tenancy**:
+  - [x] Update `Document` and `Chunk` entities to include `tenant_id`.
+  - [x] Update `LanceDBVectorStore` to enforce `tenant_id` filter on every query.
+  - [x] Update `DocumentService` to require `tenant_id` on ingestion.
 - [ ] **Redaction**:
   - [ ] Create `RedactionService` (Regex-based initially) for PII (Emails, API Keys, Phones).
   - [ ] Inject `RedactionService` into `DocumentService` pipeline _before_ embedding.

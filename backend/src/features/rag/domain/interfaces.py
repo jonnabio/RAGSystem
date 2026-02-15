@@ -111,7 +111,8 @@ class IVectorStore(Protocol):
         query_embedding: List[float],
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None,
-        table_name: Optional[str] = None
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
     ) -> List[SearchResult]:
         """
         Search for similar chunks using vector similarity.
@@ -132,7 +133,8 @@ class IVectorStore(Protocol):
         query: str,
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None,
-        table_name: Optional[str] = None
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
     ) -> List[SearchResult]:
         """
         Search for chunks using keyword matching (FTS).
@@ -148,7 +150,12 @@ class IVectorStore(Protocol):
         """
         ...
 
-    async def delete_document(self, document_id: str) -> None:
+    async def delete_document(
+        self,
+        document_id: str,
+        table_name: Optional[str] = None,
+        tenant_id: Optional[str] = None
+    ) -> None:
         """
         Delete all chunks for a document.
 

@@ -204,6 +204,7 @@ export default function ChatPage() {
             top_p: appSettings?.topP || 1.0,
             similarity_threshold: appSettings?.similarityThreshold || 0.7,
             stream: appSettings?.streamingEnabled !== false,
+            tenant_id: appSettings?.tenantId || "default",
           }),
         },
       );
