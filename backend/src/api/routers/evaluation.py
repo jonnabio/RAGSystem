@@ -1,21 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, Optional
 from src.features.rag.application.evaluation_service import EvaluationService
+from src.features.rag.application.evaluation_service import EvaluationService
 from src.features.chat.application.chat_service import ChatService
+from src.api.dependencies import get_chat_service
 import logging
 
 router = APIRouter(prefix="/api/evaluation", tags=["Evaluation"])
 logger = logging.getLogger(__name__)
 
-# Integration points for dependencies (simplified for this task)
-# In a real app, these would be injected via a container
+# Integration points for dependencies
 def get_evaluation_service():
     return EvaluationService()
-
-def get_chat_service():
-    # This assumes chat_service can be imported/instantiated or passed from app state
-    from src.main import app
-    return app.state.chat_service
 
 @router.post("/run")
 async def run_evaluation(

@@ -61,7 +61,7 @@ interface EvaluationResults {
   sample_count: number;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002";
 
 interface SystemTransparencyProps {
   latestDebugInfo?: {

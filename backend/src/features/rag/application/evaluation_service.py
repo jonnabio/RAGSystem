@@ -13,7 +13,7 @@ import traceback
 logger = logging.getLogger(__name__)
 
 class EvaluationService:
-    def __init__(self, data_dir: str = "backend/data/evaluation"):
+    def __init__(self, data_dir: str = "data/evaluation"):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.golden_dataset_path = self.data_dir / "golden_dataset.json"
@@ -128,7 +128,7 @@ class EvaluationService:
 
         summary = {
             "timestamp": pd.Timestamp.now().isoformat(),
-            "scores": result,
+            "scores": result.scores,
             "sample_count": len(eval_samples)
         }
 
