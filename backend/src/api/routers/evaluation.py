@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, Optional
 from src.features.rag.application.evaluation_service import EvaluationService
-from src.features.rag.application.evaluation_service import EvaluationService
+
 from src.features.chat.application.chat_service import ChatService
 from src.api.dependencies import get_chat_service
 import logging

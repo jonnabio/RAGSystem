@@ -121,3 +121,48 @@ async def pipeline_events(limit: int = 10):
     """Return recent pipeline runs for live visualization."""
     runs = pipeline_tracker.get_runs(limit=limit)
     return {"runs": [r.model_dump() for r in runs]}
+@router.post("/reset")
+async def reset_system() -> Dict[str, Any]:
+    """Clear all data from the vector database and document storage."""
+    import shutil
+    import os
+    from src.main import documents_db, _vector_store
+
+    try:
+        # 1. Clear in-memory docs
+        documents_db.clear()
+
+        # 2. Clear Document storage
+        if os.path.exists(settings.DOCUMENT_STORAGE_PATH):
+            for filename in os.listdir(settings.DOCUMENT_STORAGE_PATH):
+                file_path = os.path.join(settings.DOCUMENT_STORAGE_PATH, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete {file_path}: {e}")
+
+        # 3. Clear Vector DB
+        if _vector_store:
+            # Close connection if possible
+            if hasattr(_vector_store, "db") and _vector_store.db:
+                # LanceDB doesn't have an explicit close in 0.4.0 but we can clear the cache
+                _vector_store.db = None
+                _vector_store._tables = {}
+
+        if os.path.exists(settings.VECTOR_DB_PATH):
+            shutil.rmtree(settings.VECTOR_DB_PATH)
+            os.makedirs(settings.VECTOR_DB_PATH, exist_ok=True)
+
+        # Re-initialize vector store
+        if _vector_store:
+             await _vector_store.initialize()
+
+        logger.info("System reset successful")
+        return {"message": "Success", "details": "All documents and vector indices have been cleared."}
+
+    except Exception as e:
+        logger.error(f"Error during system reset: {e}")
+        return {"message": "Error", "details": str(e)}

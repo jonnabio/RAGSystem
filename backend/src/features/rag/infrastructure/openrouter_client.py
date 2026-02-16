@@ -1,7 +1,9 @@
 """OpenRouter LLM client implementation."""
 
 import httpx
+import asyncio
 from typing import List, Dict, Any, Optional
+
 import logging
 from src.features.rag.domain.interfaces import Message, LLMResponse
 
@@ -86,51 +88,76 @@ class OpenRouterClient:
             **kwargs
         }
 
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/chat/completions",
-                json=payload
-            )
+        import time
+        max_retries = 3
+        retry_delay = 2  # base delay in seconds
 
-            response.raise_for_status()
-            data = response.json()
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload
+                )
 
-            # Extract response
-            choice = data["choices"][0]
-            content = choice["message"]["content"]
-            finish_reason = choice.get("finish_reason")
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Rate limited by OpenRouter (429). Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    else:
+                        logger.error("Max retries reached for OpenRouter 429.")
 
-            # Extract usage info
-            usage = data.get("usage", {})
-            tokens_used = usage.get("total_tokens", 0)
+                response.raise_for_status()
+                data = response.json()
 
-            # Calculate cost (if available)
-            cost = self._calculate_cost(data, tokens_used)
+                # Extract response
+                choice = data["choices"][0]
+                content = choice["message"]["content"]
+                finish_reason = choice.get("finish_reason")
 
-            logger.info(
-                f"Generated response from {model}: "
-                f"{tokens_used} tokens, cost: ${cost:.4f}"
-            )
+                # Extract usage info
+                usage = data.get("usage", {})
+                tokens_used = usage.get("total_tokens", 0)
 
-            return LLMResponse(
-                content=content,
-                model=model,
-                tokens_used=tokens_used,
-                cost=cost,
-                finish_reason=finish_reason
-            )
+                # Calculate cost (if available)
+                cost = self._calculate_cost(data, tokens_used)
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error from OpenRouter: {e}")
-            raise RuntimeError(f"OpenRouter API error: {e.response.text}")
-        except httpx.TimeoutException:
-            logger.error("Request to OpenRouter timed out")
-            raise RuntimeError("Request timed out")
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            raise RuntimeError(f"Failed to generate response: {e}")
+                logger.info(
+                    f"Generated response from {model}: "
+                    f"{tokens_used} tokens, cost: ${cost:.4f}"
+                )
+
+                return LLMResponse(
+                    content=content,
+                    model=model,
+                    tokens_used=tokens_used,
+                    cost=cost,
+                    finish_reason=finish_reason
+                )
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                     logger.warning(f"HTTP 429 error. Retrying... ({attempt + 1})")
+                     await asyncio.sleep(retry_delay)
+                     retry_delay *= 2
+                     continue
+                logger.error(f"HTTP error from OpenRouter: {e}")
+                raise RuntimeError(f"OpenRouter API error: {e.response.text}")
+            except httpx.TimeoutException:
+                logger.error("Request to OpenRouter timed out")
+                raise RuntimeError("Request timed out")
+            except Exception as e:
+                logger.error(f"Unexpected error during OpenRouter call: {e}")
+                raise RuntimeError(f"Failed to generate response: {e}")
+
+
+    async def generate_response(self, *args, **kwargs) -> LLMResponse:
+        """Alias for generate() to support different interface naming conventions."""
+        return await self.generate(*args, **kwargs)
 
     async def get_available_models(self) -> List[Dict[str, Any]]:
+
         """
         Get list of available models from OpenRouter.
 

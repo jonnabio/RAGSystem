@@ -116,11 +116,27 @@ class LanceDBVectorStore:
                 self._tables[table_name] = table
             else:
                 table = self._tables.get(table_name) or self.db.open_table(table_name)
-                table.add(data)
+
+                # Check for schema mismatch (specifically missing tenant_id or created_at)
+                existing_cols = table.schema.names
+                data_cols = data[0].keys() if data else []
+                missing_in_vdb = [c for c in data_cols if c not in existing_cols]
+
+                if missing_in_vdb:
+                    logger.warning(f"Schema mismatch: missing columns {missing_in_vdb} in table '{table_name}'. Dropping and recreating table to evolve schema.")
+                    # In a production app, we would migrate. Here, we recreate for simplicity.
+                    self.db.drop_table(table_name)
+                    table = self.db.create_table(table_name, data=data)
+                else:
+                    table.add(data)
+
                 self._tables[table_name] = table
         except Exception as e:
             logger.error(f"Error adding data to LanceDB: {e}")
+            if "not found in target schema" in str(e):
+                logger.error("Schema mismatch detected. You may need to use the 'Reset Database' button in Settings.")
             raise RuntimeError(f"Failed to add chunks: {e}")
+
 
     async def search(
         self,

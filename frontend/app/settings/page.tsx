@@ -46,13 +46,13 @@ export default function SettingsPage() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (
       globalThis.confirm(
         "ARE YOU SURE? This will permanently delete ALL chat history, analytics, and document counts. This action cannot be undone.",
       )
     ) {
-      resetAllSystemData();
+      await resetAllSystemData();
     }
   };
 

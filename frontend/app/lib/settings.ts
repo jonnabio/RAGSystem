@@ -73,10 +73,21 @@ export const saveSettings = (updates: Partial<AppSettings>): AppSettings => {
 /**
  * Resets all application data including settings, history, and analytics
  */
-export const resetAllSystemData = () => {
+export const resetAllSystemData = async () => {
   if (globalThis.window === undefined) return;
 
-  // Clear core storage keys
+  try {
+    // 1. Clear Backend Data (Vector DB, Documents)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002";
+    await fetch(`${apiUrl}/api/system/reset`, {
+      method: "POST",
+    });
+  } catch (error) {
+    console.error("Failed to reset backend data:", error);
+    // Continue with frontend reset anyway
+  }
+
+  // 2. Clear core storage keys
   localStorage.removeItem(SETTINGS_KEY);
   localStorage.removeItem("rag-conversations");
   localStorage.removeItem("rag-analytics");
