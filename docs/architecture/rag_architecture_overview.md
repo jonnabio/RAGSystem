@@ -149,3 +149,9 @@ A critical debugging tool that reveals:
 | **RRF**          | Reciprocal Rank Fusion - a method to combine results from different search algorithms. |
 | **Tenancy**      | Isolating data so users only see what belongs to them.                                 |
 | **Vector Store** | A specialized database (LanceDB) for fast similarity search.                           |
+
+---
+
+## 8. Related Documentation
+
+- [RAG Implementation Patterns](./rag_implementation_patterns.md): Specific code locations and implementation details for the architectural patterns described above.
